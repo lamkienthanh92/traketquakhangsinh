@@ -1,0 +1,656 @@
+[
+ {
+  "patientName": "Bệnh nhân mẫu 1",
+  "patientId": "MAU-01",
+  "labId": "LAB-01",
+  "isolateNo": "1",
+  "printed": "",
+  "organism": "Streptococcus mitis",
+  "source": "",
+  "location": "",
+  "physician": "",
+  "hospital": "",
+  "aesConfidence": "Consistent",
+  "results": [
+   {
+    "id": "PEN",
+    "rawName": "Benzylpenicillin",
+    "op": "=",
+    "mic": 0.5,
+    "vitek": "I",
+    "flags": ""
+   },
+   {
+    "id": "CLI",
+    "rawName": "Clindamycin",
+    "op": ">=",
+    "mic": 1,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "AMP",
+    "rawName": "Ampicillin",
+    "op": "=",
+    "mic": 1,
+    "vitek": "I",
+    "flags": ""
+   },
+   {
+    "id": "LNZ",
+    "rawName": "Linezolid",
+    "op": "<=",
+    "mic": 2,
+    "vitek": "S",
+    "flags": ""
+   },
+   {
+    "id": "CTX",
+    "rawName": "Cefotaxime",
+    "op": "=",
+    "mic": 0.5,
+    "vitek": "S",
+    "flags": ""
+   },
+   {
+    "id": "VAN",
+    "rawName": "Vancomycin",
+    "op": "=",
+    "mic": 0.5,
+    "vitek": "S",
+    "flags": ""
+   },
+   {
+    "id": "CRO",
+    "rawName": "Ceftriaxone",
+    "op": "=",
+    "mic": 1,
+    "vitek": "S",
+    "flags": ""
+   },
+   {
+    "id": "TCY",
+    "rawName": "Tetracycline",
+    "op": ">=",
+    "mic": 16,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "LVX",
+    "rawName": "Levofloxacin",
+    "op": ">=",
+    "mic": 16,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "TGC",
+    "rawName": "Tigecycline",
+    "op": "=",
+    "mic": 0.12,
+    "vitek": "S",
+    "flags": ""
+   },
+   {
+    "id": "MXF",
+    "rawName": "Moxifloxacin",
+    "op": ">=",
+    "mic": 4,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "CHL",
+    "rawName": "Chloramphenicol",
+    "op": "=",
+    "mic": 4,
+    "vitek": "S",
+    "flags": ""
+   }
+  ],
+  "quals": {},
+  "unknown": []
+ },
+ {
+  "patientName": "Bệnh nhân mẫu 2",
+  "patientId": "MAU-02",
+  "labId": "LAB-02",
+  "isolateNo": "1",
+  "printed": "",
+  "organism": "Escherichia coli",
+  "source": "",
+  "location": "",
+  "physician": "",
+  "hospital": "",
+  "aesConfidence": "Consistent",
+  "results": [
+   {
+    "id": "ETP",
+    "rawName": "Ertapenem",
+    "op": ">=",
+    "mic": 8,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "AMP",
+    "rawName": "Ampicillin",
+    "op": ">=",
+    "mic": 32,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "IPM",
+    "rawName": "Imipenem",
+    "op": "=",
+    "mic": 8,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "PIP",
+    "rawName": "Piperacillin",
+    "op": ">=",
+    "mic": 128,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "MEM",
+    "rawName": "Meropenem",
+    "op": ">=",
+    "mic": 16,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "TZP",
+    "rawName": "Piperacillin/Tazobactam",
+    "op": ">=",
+    "mic": 128,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "GEN",
+    "rawName": "Gentamicin",
+    "op": "<=",
+    "mic": 1,
+    "vitek": "S",
+    "flags": ""
+   },
+   {
+    "id": "CXM",
+    "rawName": "Cefuroxime",
+    "op": ">=",
+    "mic": 64,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "CIP",
+    "rawName": "Ciprofloxacin",
+    "op": "<=",
+    "mic": 0.06,
+    "vitek": "S",
+    "flags": ""
+   },
+   {
+    "id": "CXMA",
+    "rawName": "Cefuroxime Axetil",
+    "op": ">=",
+    "mic": 64,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "TGC",
+    "rawName": "Tigecycline",
+    "op": "<=",
+    "mic": 0.5,
+    "vitek": "S",
+    "flags": ""
+   },
+   {
+    "id": "CTX",
+    "rawName": "Cefotaxime",
+    "op": "=",
+    "mic": 32,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "SXT",
+    "rawName": "Trimethoprim/Sulfamethoxazole",
+    "op": ">=",
+    "mic": 320,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "CAZ",
+    "rawName": "Ceftazidime",
+    "op": ">=",
+    "mic": 64,
+    "vitek": "R",
+    "flags": ""
+   }
+  ],
+  "quals": {
+   "ESBL": "NEG"
+  },
+  "unknown": []
+ },
+ {
+  "patientName": "Bệnh nhân mẫu 3",
+  "patientId": "MAU-03",
+  "labId": "LAB-03",
+  "isolateNo": "1",
+  "printed": "",
+  "organism": "Staphylococcus aureus",
+  "source": "",
+  "location": "",
+  "physician": "",
+  "hospital": "",
+  "aesConfidence": "Consistent",
+  "results": [
+   {
+    "id": "CLI",
+    "rawName": "Clindamycin",
+    "op": ">=",
+    "mic": 8,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "PEN",
+    "rawName": "Benzylpenicillin",
+    "op": ">=",
+    "mic": 0.5,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "QDA",
+    "rawName": "Quinupristin/Dalfopristin",
+    "op": "<=",
+    "mic": 0.25,
+    "vitek": "S",
+    "flags": ""
+   },
+   {
+    "id": "OXA",
+    "rawName": "Oxacillin",
+    "op": ">=",
+    "mic": 4,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "LNZ",
+    "rawName": "Linezolid",
+    "op": "=",
+    "mic": 1,
+    "vitek": "S",
+    "flags": ""
+   },
+   {
+    "id": "GEN",
+    "rawName": "Gentamicin",
+    "op": ">=",
+    "mic": 16,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "VAN",
+    "rawName": "Vancomycin",
+    "op": "=",
+    "mic": 1,
+    "vitek": "S",
+    "flags": ""
+   },
+   {
+    "id": "CIP",
+    "rawName": "Ciprofloxacin",
+    "op": ">=",
+    "mic": 8,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "TCY",
+    "rawName": "Tetracycline",
+    "op": "<=",
+    "mic": 1,
+    "vitek": "S",
+    "flags": ""
+   },
+   {
+    "id": "LVX",
+    "rawName": "Levofloxacin",
+    "op": ">=",
+    "mic": 8,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "TGC",
+    "rawName": "Tigecycline",
+    "op": "<=",
+    "mic": 0.12,
+    "vitek": "S",
+    "flags": ""
+   },
+   {
+    "id": "MXF",
+    "rawName": "Moxifloxacin",
+    "op": "=",
+    "mic": 4,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "NIT",
+    "rawName": "Nitrofurantoin",
+    "op": "<=",
+    "mic": 16,
+    "vitek": "S",
+    "flags": ""
+   },
+   {
+    "id": "RIF",
+    "rawName": "Rifampicin",
+    "op": ">=",
+    "mic": 32,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "ERY",
+    "rawName": "Erythromycin",
+    "op": ">=",
+    "mic": 8,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "SXT",
+    "rawName": "Trimethoprim/Sulfamethoxazole",
+    "op": ">=",
+    "mic": 320,
+    "vitek": "R",
+    "flags": ""
+   }
+  ],
+  "quals": {
+   "FOXS": "POS",
+   "ICR": "NEG"
+  },
+  "unknown": []
+ },
+ {
+  "patientName": "Bệnh nhân mẫu 4",
+  "patientId": "MAU-04",
+  "labId": "LAB-04",
+  "isolateNo": "1",
+  "printed": "",
+  "organism": "Escherichia coli",
+  "source": "",
+  "location": "",
+  "physician": "",
+  "hospital": "",
+  "aesConfidence": "Consistent",
+  "results": [
+   {
+    "id": "ETP",
+    "rawName": "Ertapenem",
+    "op": ">=",
+    "mic": 8,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "AMP",
+    "rawName": "Ampicillin",
+    "op": ">=",
+    "mic": 32,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "IPM",
+    "rawName": "Imipenem",
+    "op": "=",
+    "mic": 8,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "PIP",
+    "rawName": "Piperacillin",
+    "op": ">=",
+    "mic": 128,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "MEM",
+    "rawName": "Meropenem",
+    "op": ">=",
+    "mic": 16,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "TZP",
+    "rawName": "Piperacillin/Tazobactam",
+    "op": ">=",
+    "mic": 128,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "GEN",
+    "rawName": "Gentamicin",
+    "op": ">=",
+    "mic": 16,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "CXM",
+    "rawName": "Cefuroxime",
+    "op": ">=",
+    "mic": 64,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "CIP",
+    "rawName": "Ciprofloxacin",
+    "op": ">=",
+    "mic": 4,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "CXMA",
+    "rawName": "Cefuroxime Axetil",
+    "op": ">=",
+    "mic": 64,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "TGC",
+    "rawName": "Tigecycline",
+    "op": "<=",
+    "mic": 0.5,
+    "vitek": "S",
+    "flags": ""
+   },
+   {
+    "id": "CTX",
+    "rawName": "Cefotaxime",
+    "op": ">=",
+    "mic": 64,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "SXT",
+    "rawName": "Trimethoprim/Sulfamethoxazole",
+    "op": "<=",
+    "mic": 20,
+    "vitek": "S",
+    "flags": ""
+   },
+   {
+    "id": "CAZ",
+    "rawName": "Ceftazidime",
+    "op": ">=",
+    "mic": 64,
+    "vitek": "R",
+    "flags": ""
+   }
+  ],
+  "quals": {
+   "ESBL": "NEG"
+  },
+  "unknown": []
+ },
+ {
+  "patientName": "Bệnh nhân mẫu 5",
+  "patientId": "MAU-05",
+  "labId": "LAB-05",
+  "isolateNo": "1",
+  "printed": "",
+  "organism": "Klebsiella pneumoniae ssp pneumoniae",
+  "source": "",
+  "location": "",
+  "physician": "",
+  "hospital": "",
+  "aesConfidence": "Consistent",
+  "results": [
+   {
+    "id": "ETP",
+    "rawName": "Ertapenem",
+    "op": ">=",
+    "mic": 8,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "AMP",
+    "rawName": "Ampicillin",
+    "op": ">=",
+    "mic": 32,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "IPM",
+    "rawName": "Imipenem",
+    "op": ">=",
+    "mic": 16,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "PIP",
+    "rawName": "Piperacillin",
+    "op": ">=",
+    "mic": 128,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "MEM",
+    "rawName": "Meropenem",
+    "op": ">=",
+    "mic": 16,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "TZP",
+    "rawName": "Piperacillin/Tazobactam",
+    "op": ">=",
+    "mic": 128,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "GEN",
+    "rawName": "Gentamicin",
+    "op": "<=",
+    "mic": 1,
+    "vitek": "S",
+    "flags": ""
+   },
+   {
+    "id": "CXM",
+    "rawName": "Cefuroxime",
+    "op": ">=",
+    "mic": 64,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "CIP",
+    "rawName": "Ciprofloxacin",
+    "op": ">=",
+    "mic": 4,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "CXMA",
+    "rawName": "Cefuroxime Axetil",
+    "op": ">=",
+    "mic": 64,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "TGC",
+    "rawName": "Tigecycline",
+    "op": "=",
+    "mic": 1,
+    "vitek": "S",
+    "flags": ""
+   },
+   {
+    "id": "CTX",
+    "rawName": "Cefotaxime",
+    "op": ">=",
+    "mic": 64,
+    "vitek": "R",
+    "flags": ""
+   },
+   {
+    "id": "SXT",
+    "rawName": "Trimethoprim/Sulfamethoxazole",
+    "op": "<=",
+    "mic": 20,
+    "vitek": "S",
+    "flags": ""
+   },
+   {
+    "id": "CAZ",
+    "rawName": "Ceftazidime",
+    "op": ">=",
+    "mic": 64,
+    "vitek": "R",
+    "flags": ""
+   }
+  ],
+  "quals": {
+   "ESBL": "NEG"
+  },
+  "unknown": []
+ }
+]

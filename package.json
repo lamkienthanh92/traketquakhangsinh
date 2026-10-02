@@ -1,0 +1,17 @@
+{
+  "name": "vitek-clsi-ast",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Đọc báo cáo Vitek 2 (PDF), diễn giải kháng sinh đồ theo CLSI M100-Ed36 hoặc EUCAST v16.0, xuất phiếu Word và file Excel KSNK.",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test",
+    "check": "npm run build && npm test"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
