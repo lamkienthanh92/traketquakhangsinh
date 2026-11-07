@@ -18,6 +18,12 @@ Phiếu "PHIẾU KẾT QUẢ XÉT NGHIỆM VI SINH" của khoa (Chủng vi sinh 
 
 Lưu ý: họ tên, năm sinh, khoa, chẩn đoán cũng do OCR đọc, dấu tiếng Việt hay sai; luôn kiểm tra trước khi in phiếu. Lần OCR đầu cần internet để tải thư viện và mô hình ngôn ngữ từ jsDelivr (ảnh và văn bản không gửi đi đâu).
 
+## Đưa lên Netlify
+
+`index.html` nằm trong `dist/`, không nằm ở gốc project. Nếu Netlify báo "Page not found":
+- Nối repo GitHub: file `netlify.toml` đã đặt sẵn `publish = "dist"`; deploy lại là xong. Nhớ commit cả thư mục `dist/` (sau mỗi lần sửa code, chạy `npm run build` rồi commit lại `dist/index.html`).
+- Kéo thả thủ công: kéo **thư mục `dist`** (hoặc file `netlify-deploy.zip`) vào Netlify Drop, không kéo cả thư mục project.
+
 ## Tính năng chính
 
 - Đọc nhiều PDF Vitek một lúc (hoặc dán văn bản). Tự nhận vi khuẩn, MIC, kết quả và các dòng ESBL, cefoxitin screen, ICR.

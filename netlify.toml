@@ -1,0 +1,4 @@
+# Netlify phục vụ thư mục dist (index.html đã build sẵn và được đưa vào repo).
+# Không cần lệnh build; nếu muốn build lại trên Netlify, thêm: command = "npm run build"
+[build]
+  publish = "dist"
