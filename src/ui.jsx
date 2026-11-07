@@ -86,6 +86,13 @@ const HOSP_KEY = 'ast_hospital_v1';
 const HOSP_DEFAULT = { agency: 'SỞ Y TẾ TP. HỒ CHÍ MINH', name: 'BỆNH VIỆN ĐA KHOA LÃNH BINH THĂNG', accreditation: '', lab: 'KHOA XÉT NGHIỆM', instrument: 'Vitek 2', chief: '', address: '', phone: '', web: '' };
 function loadHosp() { try { return { ...HOSP_DEFAULT, ...(JSON.parse(window.localStorage.getItem(HOSP_KEY) || '{}') || {}) }; } catch (e) { return { ...HOSP_DEFAULT }; } }
 function saveHosp(h) { try { window.localStorage.setItem(HOSP_KEY, JSON.stringify(h)); } catch (e) { /* storage may be unavailable */ } }
+// tên khoa trên phiếu ("Khoa truyền nhiễm") -> cách ghi trong file KSNK ("Truyền Nhiễm")
+function normDept(s) {
+  const t = String(s || '').trim().replace(/^khoa\s+/i, '');
+  if (!t) return '';
+  const k = foldU(t);
+  return DEPTS.find((d) => foldU(d) === k) || t;
+}
 const MAP_KEY = 'ast_org_group_map_v1';
 function loadMap() { try { return JSON.parse(window.localStorage.getItem(MAP_KEY) || '{}') || {}; } catch (e) { return {}; } }
 function saveMap(m) { try { window.localStorage.setItem(MAP_KEY, JSON.stringify(m)); } catch (e) { /* storage may be unavailable */ } }
@@ -180,6 +187,7 @@ function Chip({ cat }) {
 function Pill({ kind, children }) { return <span className={`pill p-${kind}`}>{children}</span>; }
 
 /* ------------------------------------------------------------ report sheet */
+const foldU = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase().replace(/\s+/g, ' ').trim();
 const DEPTS = ['Nội tổng hợp', 'Ngoại chấn thương', 'Truyền Nhiễm', 'ICU', 'Tim mạch chuyển hóa', 'Nội thần kinh', 'Ngoại tổng hợp', 'Ngoại thần kinh', 'Phụ sản', 'Nhi', 'Tai Mũi Họng'];
 
 function Field({ label, en, children, print, wide }) {
@@ -251,6 +259,7 @@ function ReportSheet({ item, rep, onField, sheetRef, reviewer, showMic, showFn, 
           <input value={item.sampTime || ''} placeholder="hh:mm" maxLength={5} onChange={(e) => onField({ sampTime: e.target.value })} aria-label="Giờ lấy mẫu" className="w-s" />
           {printedDmy && !item.date && <button type="button" className="lnk inl" onClick={() => onField({ date: printedDmy })} title="Ngày in báo cáo trên Vitek – chỉ dùng nếu đúng là ngày lấy mẫu">dùng ngày in Vitek ({printedDmy})</button>}
           {iso.performedDmy && !item.date && <button type="button" className="lnk inl" onClick={() => onField({ date: iso.performedDmy })} title="Ngày thực hiện ghi trên phiếu của khoa – chỉ dùng nếu đúng là ngày lấy mẫu">dùng ngày thực hiện trên phiếu ({iso.performedDmy})</button>}
+          {item.dateFromPhieu && item.date === iso.performedDmy && !dateBad && <span className="small"> lấy từ “Thời gian thực hiện” trên phiếu, sửa nếu khác ngày lấy mẫu</span>}
           {dateBad && <span className="warn-t"> định dạng dd/mm/yyyy</span>}
         </Field>
         <Field label="Tình trạng mẫu" en="Sample status" print={item.sampleStatus}>
@@ -808,8 +817,10 @@ function App() {
   const [hosp, setHospState] = useState(loadHosp);
   const setHosp = (h) => { setHospState(h); saveHosp(h); };
   const [sttStart, setSttStart] = useState('1');
-  const [sddAs, setSddAs] = useState('SDD');
-  const [notesSheet, setNotesSheet] = useState(true);
+  const [sddAs, setSddAs] = useState('I');
+  const [notesSheet, setNotesSheet] = useState(false);
+  const [allDrugs, setAllDrugs] = useState(true);
+  const [markMulti, setMarkMulti] = useState(true);
   const sheetRef = useRef(null);
   const fileRef = useRef(null);
   const uid = useRef(1);
@@ -822,7 +833,7 @@ function App() {
     const specVi = guessViSpecimen(iso.source);
     const key = E.classifyOrganism(iso.organism).key;
     const stored = loadMap()[key];
-    const it = { uid: id, fileName, iso, groupOverride: stored || '', mappedRemembered: !!stored, specVi, specimen: SPEC_TO_ENGINE[specVi] || 'unknown', name: iso.patientName || '', age: iso.age === undefined || iso.age === null ? '' : String(iso.age), sex: iso.sex || '', dept: iso.location || '', date: '', phone: '', address: iso.address || '', diagnosis: iso.diagnosis || '', reqDoctor: iso.physician || '', preview: (extra && extra.preview) || '', sampleStatus: 'Đạt', sampler: '', receiver: '', recvTime: '', sampTime: '', approved: false, approvedAt: '', forceShow: [], forceHide: [], resolved: {}, restored: {} };
+    const it = { uid: id, fileName, iso, groupOverride: stored || '', mappedRemembered: !!stored, specVi, specimen: SPEC_TO_ENGINE[specVi] || 'unknown', name: iso.patientName || '', age: iso.age === undefined || iso.age === null ? '' : String(iso.age), sex: iso.sex || '', dept: normDept(iso.location), date: iso.performedDmy || '', dateFromPhieu: !!iso.performedDmy, phone: '', address: iso.address || '', diagnosis: iso.diagnosis || '', reqDoctor: iso.physician || '', preview: (extra && extra.preview) || '', sampleStatus: 'Đạt', sampler: '', receiver: '', recvTime: '', sampTime: '', approved: false, approvedAt: '', forceShow: [], forceHide: [], resolved: {}, restored: {} };
     setItems((p) => [...p, it]);
     setSel((s) => s == null ? id : s);
     return it;
@@ -922,7 +933,7 @@ function App() {
       }));
     if (!entries.length) return;
     try {
-      const { bytes } = K.buildWorkbook(entries, { sttStart: parseInt(sttStart, 10) || 1, sdd: sddAs, notesSheet });
+      const { bytes } = K.buildWorkbook(entries, { sttStart: parseInt(sttStart, 10) || 1, sdd: sddAs, notesSheet, allDrugs, markMulti });
       const r = await saveFile(`Khang_sinh_do_BVDKLBT_${todayCompact()}.xlsx`, bytes);
       if (r === 'saved' || r === 'fallback') setToast(`Đã xuất Excel (${entries.length} chủng)`); else if (r === 'unavailable') setToast('Môi trường này không cho lưu tệp .xlsx'); else if (r === 'failed') setToast('Không lưu được tệp');
     } catch (e) { setToast('Lỗi tạo Excel: ' + (e.message || e)); }
@@ -1030,10 +1041,12 @@ function App() {
                 <div className="xl-row">
                   <label className="fl">STT bắt đầu từ<input type="number" min="1" value={sttStart} onChange={(e) => setSttStart(e.target.value)} className="w-s" /></label>
                   <label className="fl">Kết quả SDD ghi là
-                    <select value={sddAs} onChange={(e) => setSddAs(e.target.value)}><option value="SDD">SDD</option><option value="I">I</option></select>
+                    <select value={sddAs} onChange={(e) => setSddAs(e.target.value)}><option value="I">I (như file KSNK cũ)</option><option value="SDD">SDD</option></select>
                   </label>
                 </div>
-                <label className="chk"><input type="checkbox" checked={notesSheet} onChange={(e) => setNotesSheet(e.target.checked)} /> Kèm sheet “Ghi chu KTV” (cảnh báo, thuốc bị ẩn, thông tin thiếu)</label>
+                <label className="chk"><input type="checkbox" checked={allDrugs} onChange={(e) => setAllDrugs(e.target.checked)} /> Ghi cả thuốc không báo lâm sàng (cascade, tier 4…) như file KSNK cũ</label>
+                <label className="chk"><input type="checkbox" checked={markMulti} onChange={(e) => setMarkMulti(e.target.checked)} /> Cột D = 1 khi một bệnh nhân có từ 2 vi khuẩn (xếp các dòng liền nhau)</label>
+                <label className="chk"><input type="checkbox" checked={notesSheet} onChange={(e) => setNotesSheet(e.target.checked)} /> Kèm sheet “Ghi chu KTV” (cảnh báo, thuốc bị ẩn, thông tin thiếu). Bỏ tick khi tải lên web chỉ đọc Sheet1</label>
                 <button className="btn" onClick={doExcel} disabled={!nApproved}>Xuất Excel ({nApproved} chủng đã duyệt)</button>
                 <button className="btn ghost" onClick={() => doWord(true)} disabled={!nApproved}>Xuất Word trả lâm sàng ({nApproved} chủng đã duyệt)</button>
                 {!nApproved && <p className="small">Chỉ các chủng đã bấm “Duyệt” mới được đưa vào tệp. Word gộp mỗi chủng một trang để in; bản Word của chủng chưa duyệt (nút ở tab “Bản trả lâm sàng”) có dòng “BẢN NHÁP”.</p>}

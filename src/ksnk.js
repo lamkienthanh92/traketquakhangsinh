@@ -7,7 +7,9 @@
   // columns J..BQ of the template, in the original order (note: "Cefe" appears twice, Q and BF)
   const DRUG_HEADERS = ['Am/cl', 'Amik', 'Amo', 'Ampi/sul', 'Ampi', 'Bac', 'Cefa', 'Cefe', 'Cefop', 'Cefota', 'Cefoxi', 'Cefta', 'Ceftri', 'Cefu', 'Cepha', 'Cipro', 'Clin', 'Colis', 'Chloram', 'Doxy', 'Genta', 'Imi', 'Erta', 'Ery', 'Levo', 'Line', 'Mero', 'Nali', 'Neo', 'Netil', 'Nitro', 'Nor', 'Oflo', 'Oxa', 'Peni', 'Piper/tazo', 'Fos', 'Poly', 'Rifa', 'Tetra', 'Tica', 'Tobra', 'Trime/Sulfa', 'Van', 'Tige', 'Teicoplanin', 'Ticarcillin/clavulanic acid', 'Clari', 'Cefe', 'Ceftaroline', 'Ceftazidime-avibactam', 'Cefaclor', 'Moxifloxacin', 'Quinupristin/Dalfopristin', 'Piperacillin', 'Cefuroxime Axetil', 'Ceftolozane/Tazobactam', 'Imipenem/Relebactam', 'Benzylpenicillin', 'Meropenem/Vaborbactam'];
   const HEADERS = ID_HEADERS.concat(DRUG_HEADERS); // 69 columns, A..BQ
-  const CEFE_NEW = HEADERS.indexOf('Cefe'); // column Q: cefepime (the template's second "Cefe" column, BF, is left empty)
+  // Cefepime: file mẫu thật của khoa có hai cột "Cefe" (Q và BF). Các dòng cũ ghi ở Q, nhưng 300 dòng gần nhất ghi hết ở BF (Q trống),
+  // nên cefepime được ghi vào BF (cột "Cefe" thứ hai) và Q để trống.
+  const CEFE_NEW = HEADERS.lastIndexOf('Cefe');
 
   const ID_TO_HEADER = {
     AMP: 'Ampi', PEN: 'Peni', AMC: 'Am/cl', SAM: 'Ampi/sul', PIP: 'Piperacillin', TZP: 'Piper/tazo', OXA: 'Oxa', CZO: 'Cefa',
@@ -52,14 +54,24 @@
    * returns { rows: [{cells: Array(69), notes: {...}}] }
    */
   function buildRows(entries, opts) {
-    const o = Object.assign({ sttStart: 1, sdd: 'SDD' }, opts || {});
+    const o = Object.assign({ sttStart: 1, sdd: 'SDD', allDrugs: false, markMulti: false }, opts || {});
     const mapCat = (c) => (c === 'SDD' ? o.sdd : c);
-    return entries.map((e, i) => {
+    // Cột D (không tiêu đề) của file mẫu = 1 khi cùng một bệnh nhân/mẫu có từ 2 vi khuẩn trở lên; các dòng đó nằm liền nhau.
+    const gkey = (e) => [e.name, e.date, e.specVi, e.age, e.dept].map((x) => String(x == null ? '' : x).trim().toLowerCase()).join('|');
+    let list = entries;
+    const multi = new Set();
+    if (o.markMulti) {
+      const groups = new Map();
+      entries.forEach((e) => { const k = e.name ? gkey(e) : null; if (k == null) return; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(e); });
+      const seen = new Set(); list = [];
+      entries.forEach((e) => { const k = e.name ? gkey(e) : null; if (k == null) { list.push(e); return; } if (seen.has(k)) return; seen.add(k); groups.get(k).forEach((x) => list.push(x)); if (groups.get(k).length > 1) groups.get(k).forEach((x) => multi.add(x)); });
+    }
+    return list.map((e, i) => {
       const cells = new Array(HEADERS.length).fill(null);
       cells[0] = o.sttStart + i;
       cells[1] = e.date || '';
       cells[2] = e.name || '';
-      cells[3] = null;
+      cells[3] = multi.has(e) ? 1 : null;
       cells[4] = e.dept || '';
       cells[5] = e.age === '' || e.age == null || isNaN(Number(e.age)) ? null : Number(e.age);
       cells[6] = e.sex || '';
@@ -91,6 +103,19 @@
           if (c < 0) { unmapped.push(r.name); return; }
           if (r.cat) cells[c] = mapCat(r.cat);
         });
+        // chế độ KSNK: file Excel của khoa ghi cả những thuốc không báo cho lâm sàng (cascade, tier 4, không có breakpoint CLSI…)
+        if (o.allDrugs) {
+          const extra = [];
+          (rep.hidden || []).forEach((h) => {
+            if (['qc', 'manual'].includes(h.kind)) return; // chờ xét nghiệm bổ sung / KTV chủ động ẩn: không ghi
+            const c = colForId(h.id, gk);
+            if (c < 0 || cells[c] != null) return;
+            const v = h.cat || (['S', 'I', 'R', 'SDD', 'NS'].includes(h.vitek) ? h.vitek : null);
+            if (!v) return;
+            cells[c] = mapCat(v); extra.push(`${h.name} = ${mapCat(v)}${h.cat ? '' : ' (theo Vitek, CLSI không có breakpoint)'}`);
+          });
+          if (extra.length) derived.push('Ghi thêm thuốc không báo lâm sàng (chế độ KSNK): ' + extra.join('; '));
+        }
         if (rep.mapped) derived.push(`Ngoại suy theo bảng "${rep.mapped.label}" (vi khuẩn không có bảng riêng trong CLSI)`);
         // Staphylococcus: the lab's sheet records the cefoxitin screen in the "Cefoxi" column
         if (/^staph/.test(gk || '')) {
@@ -156,7 +181,7 @@
     return x;
   }
   const STYLES = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-    + '<fonts count="2"><font><sz val="12"/><name val="Arial"/><family val="2"/></font><font><b/><sz val="11"/><name val="Times New Roman"/><family val="1"/></font></fonts>'
+    + '<fonts count="2"><font><sz val="11"/><name val="Times New Roman"/><family val="1"/></font><font><b/><sz val="11"/><name val="Times New Roman"/><family val="1"/></font></fonts>'
     + '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'
     + '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color auto="1"/></left><right style="thin"><color auto="1"/></right><top style="thin"><color auto="1"/></top><bottom style="thin"><color auto="1"/></bottom><diagonal/></border></borders>'
     + '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'

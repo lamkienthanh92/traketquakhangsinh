@@ -119,15 +119,15 @@ test('EUCAST: MIC cắt ngang breakpoint thì ẩn, không báo S/I/R bừa', ()
   assert.equal(hidden(r, 'SXT').kind, 'qc');
 });
 
-test('Excel KSNK: 69 cột, cefepime vào cột Q, cột BF để trống, file là zip', () => {
+test('Excel KSNK: 69 cột, cefepime vào cột BF (Cefe thứ hai), cột Q để trống, file là zip', () => {
   assert.equal(K.HEADERS.length, 69);
-  assert.equal(K.CEFE_NEW, 16);
+  assert.equal(K.CEFE_NEW, 57);
   // cefepime là Tier 2: cần thuốc Tier 1 kháng để mở theo cascade
   const i = iso('Escherichia coli', [R('CTX', '>=', 64, 'R'), R('FEP', '=', 4, 'I'), R('GEN', '<=', 1, 'S')]);
   const entry = { date: '01/10/2026', name: 'T', dept: 'ICU', age: 40, sex: 'NAM', specVi: 'Máu', iso: i, rep: rep(i, 'blood'), reviewer: 'KTV', approvedAt: '' };
   const { bytes, built } = K.buildWorkbook([entry], { sttStart: 1, sdd: 'SDD' });
   assert.equal(bytes[0], 0x50); assert.equal(bytes[1], 0x4b);
-  assert.ok(built[0].cells[16]); assert.equal(built[0].cells[57], null);
+  assert.ok(built[0].cells[57]); assert.equal(built[0].cells[16], null);
 });
 
 test('mã vạch Code 128 khớp bảng chuẩn (đối chiếu với reportlab)', () => {
@@ -503,4 +503,22 @@ test('phiếu khoa: văn bản chạy liền, "Loại mẫu:" để trống khô
   assert.equal(p.source, 'đàm');
   assert.equal(p.address, '12 Lê Lợi');
   assert.equal(p.diagnosis, 'Viêm phổi');
+});
+
+test('Excel KSNK: ghi cả thuốc không báo lâm sàng, cột D = 1 và xếp liền nhau cho bệnh nhân nhiều vi khuẩn', () => {
+  const mk = (org, name, res) => { const i = iso(org, res); return { date: '07/01/2025', name, dept: 'Truyền Nhiễm', age: 45, sex: 'NAM', specVi: 'Nước tiểu', iso: i, rep: rep(i, 'urine'), reviewer: 'KTV', approvedAt: '' }; };
+  const a1 = mk('Escherichia coli', 'NGUYEN A', [R('AMP', '>=', 32, 'R'), R('GEN', '<=', 1, 'S'), R('CTX', '>=', 64, 'R'), R('FEP', '=', 4, 'I'), R('AMK', '<=', 2, 'S')]);
+  const b = mk('Klebsiella pneumoniae', 'TRAN B', [R('AMP', '>=', 32, 'R'), R('GEN', '<=', 1, 'S')]);
+  const a2 = mk('Enterococcus faecalis', 'NGUYEN A', [R('AMP', '<=', 2, 'S'), R('VAN', '=', 1, 'S')]);
+  const plain = K.buildRows([a1, b, a2], { sttStart: 1, sdd: 'I' });
+  assert.deepEqual(plain.map((r) => r.cells[3]), [null, null, null], 'mặc định không đánh dấu cột D');
+  const full = K.buildRows([a1, b, a2], { sttStart: 336, sdd: 'I', allDrugs: true, markMulti: true });
+  assert.deepEqual(full.map((r) => r.cells[2]), ['NGUYEN A', 'NGUYEN A', 'TRAN B'], 'cùng bệnh nhân xếp liền nhau');
+  assert.deepEqual(full.map((r) => r.cells[3]), [1, 1, null]);
+  assert.deepEqual(full.map((r) => r.cells[0]), [336, 337, 338]);
+  const ecoli = full[0].cells;
+  assert.equal(ecoli[K.HEADERS.indexOf('Amik')], 'S', 'amikacin (cascade, không báo lâm sàng) vẫn được ghi ở chế độ KSNK');
+  assert.ok(/Ghi thêm thuốc không báo lâm sàng/.test(full[0].notes.derived));
+  const strict = K.buildRows([a1], { sttStart: 1, sdd: 'I', allDrugs: false })[0].cells;
+  assert.equal(strict[K.HEADERS.indexOf('Amik')], null);
 });

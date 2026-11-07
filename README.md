@@ -24,6 +24,13 @@ Lưu ý: họ tên, năm sinh, khoa, chẩn đoán cũng do OCR đọc, dấu ti
 - Nối repo GitHub: file `netlify.toml` đã đặt sẵn `publish = "dist"`; deploy lại là xong. Nhớ commit cả thư mục `dist/` (sau mỗi lần sửa code, chạy `npm run build` rồi commit lại `dist/index.html`).
 - Kéo thả thủ công: kéo **thư mục `dist`** (hoặc file `netlify-deploy.zip`) vào Netlify Drop, không kéo cả thư mục project.
 
+## Xuất Excel đúng file KSNK (đã đối chiếu với file mẫu thật)
+
+- Header 69 cột giống hệt file mẫu `Khang_sinh_do_BVDKLBT.xlsx` (kể cả cột D trống tiêu đề và hai cột "Cefe").
+- Ngày lấy mẫu ghi dạng chữ `dd/mm/yyyy` có số 0 đầu, như 1565/2621 dòng của file mẫu. **Lưu ý:** 1056 dòng còn lại trong file mẫu là ô ngày thật của Excel nhưng bị đảo ngày và tháng (ô hiện `7/1/2025` thực chất là 1 tháng 7, trong khi dòng đó là ngày 7 tháng 1 vì nằm giữa các dòng tháng 1 năm 2025). Nếu web đọc ô ngày theo giá trị Excel thì các dòng cũ đó đã sai sẵn.
+- Phiếu của khoa chỉ có "Thời gian thực hiện" nên ngày này được điền sẵn vào ô ngày lấy mẫu (ghi chú cạnh ô); sửa nếu khác.
+- Tên khoa chuẩn hóa theo file mẫu ("Khoa truyền nhiễm" → "Truyền Nhiễm"). Mặc định ghi SDD là "I", ghi cả thuốc không báo lâm sàng (file mẫu ghi gần đủ panel Vitek), và không kèm sheet "Ghi chu KTV" (file mẫu chỉ có Sheet1). Cả ba chỉnh được trong app.
+
 ## Tính năng chính
 
 - Đọc nhiều PDF Vitek một lúc (hoặc dán văn bản). Tự nhận vi khuẩn, MIC, kết quả và các dòng ESBL, cefoxitin screen, ICR.
@@ -85,5 +92,5 @@ Sửa breakpoint hoặc thêm nhóm vi khuẩn: xem `docs/NGUON-DU-LIEU.md` (s�
 - EUCAST: kiểm tra bất thường và kháng tự nhiên vẫn dùng dữ liệu CLSI vì chưa nạp EUCAST Expert Rules và Expected Resistant Phenotypes. Thẻ Vitek in SXT dạng tổng TMP+SMX nên với EUCAST một số MIC (≤20) không phân loại được và bị ẩn.
 - Chưa thử trên PDF Vitek thật của *Pseudomonas*, *Acinetobacter*, *Enterococcus*, phế cầu, *Haemophilus*. Cách Vitek in HLAR ("SYN-S/SYN-R") là suy đoán.
 - Mã vạch được đối chiếu với thư viện reportlab, chưa quét bằng máy quét thật. File Word được xác thực cấu trúc và dựng PDF bằng LibreOffice, chưa mở bằng Word.
-- File Excel KSNK không có cột cho aztreonam, minocycline, azithromycin, cefiderocol, HLAR… (chỉ nằm ở sheet "Ghi chu KTV"). Cột D không tiêu đề của file mẫu được để trống. Cefepime ghi vào cột Q.
+- File Excel KSNK không có cột cho aztreonam, minocycline, azithromycin, cefiderocol, HLAR… (chỉ nằm ở sheet "Ghi chu KTV"). Cột D không tiêu đề = 1 khi cùng một bệnh nhân có từ 2 vi khuẩn trở lên (quy luật suy ra từ file mẫu thật: 293/377 cụm nhiều dòng; có thể tắt trong app). Cefepime ghi vào cột BF (cột "Cefe" thứ hai; 300 dòng gần nhất của file mẫu thật đều dùng BF), cột Q để trống.
 - Một số quy tắc chuyên gia (ví dụ ampicillin nhạy mà cephalosporin thế hệ 3 kháng) không phải điều khoản CLSI; app ghi rõ nguồn từng quy tắc.
