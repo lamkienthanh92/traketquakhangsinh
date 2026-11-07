@@ -175,6 +175,403 @@
   }
 
   /* ------------------------------------------------------------------ */
+  /* 2b. Phiếu kết quả vi sinh của khoa (LIS, tiếng Việt), dạng chữ hoặc  */
+  /*     ảnh scan đã qua OCR. Cùng dạng kết quả với parseVitekText.       */
+  /*     Mẫu: "PHIẾU KẾT QUẢ XÉT NGHIỆM VI SINH" – Chủng vi sinh + bảng   */
+  /*     Kháng sinh | MIC (µg/mL) | Interpretation.                       */
+  /* ------------------------------------------------------------------ */
+  // bỏ dấu tiếng Việt từng ký tự một để chỉ số trong chuỗi đã bỏ dấu trùng với chuỗi gốc
+  const fold = (s) => Array.from(String(s == null ? '' : s).normalize('NFC')).map((c) => c.normalize('NFD').replace(/[\u0300-\u036f]/g, '')).join('').replace(/đ/g, 'd').replace(/Đ/g, 'D');
+
+  function lev(a, b) {
+    if (a === b) return 0;
+    const m = a.length, n = b.length;
+    if (!m) return n; if (!n) return m;
+    let prev = Array.from({ length: n + 1 }, (_, j) => j);
+    for (let i = 1; i <= m; i++) {
+      const cur = [i];
+      for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+    return prev[n];
+  }
+
+  // dãy pha loãng thường gặp trên Vitek 2 (và dãy riêng của SXT): MIC ngoài dãy này nhiều khả năng là đọc sai
+  const LADDER = new Set([0.002, 0.004, 0.008, 0.015, 0.016, 0.03, 0.032, 0.06, 0.064, 0.12, 0.125, 0.25, 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 5, 10, 20, 40, 80, 160, 320, 640]);
+  const ALIAS_KEYS = Object.keys(ALIAS);
+
+  const cleanDrugText = (s) => fold(s).toLowerCase().replace(/[|\[\]{}_~`"“”'’‘!*#@«»]/g, ' ').replace(/\s*[\/\\]\s*/g, '/').replace(/[^a-z0-9\/\-() ]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  /* Tên thuốc -> id. Khớp chính xác trước (kể cả từ thừa ở đầu), rồi mới khớp gần đúng (sai ≤1–2 ký tự) khi OCR đọc lệch. */
+  function matchDrug(rawName) {
+    const key = cleanDrugText(rawName);
+    if (!key) return null;
+    const tryKey = (k) => ALIAS[k] || ALIAS[k.replace(/-/g, '/')] || null;
+    const words = key.split(' ');
+    for (let k = 0; k < words.length; k++) {
+      const h = tryKey(words.slice(k).join(' '));
+      if (h) return { id: h.id, qual: h.qual, fuzzy: false, key };
+    }
+    const fuzzy = (k) => {
+      let best = null, bestD = 99, second = 99;
+      for (const a of ALIAS_KEYS) {
+        const allow = a.length >= 10 ? 2 : a.length >= 7 ? 1 : 0;
+        if (!allow || Math.abs(a.length - k.length) > allow) continue;
+        const d = lev(k, a);
+        if (d > allow) continue;
+        const h = ALIAS[a];
+        if (d < bestD) { if (best && best.id !== h.id) second = bestD; best = h; bestD = d; } else if (best && h.id !== best.id) second = Math.min(second, d);
+      }
+      return best && bestD < second ? { id: best.id, qual: best.qual, fuzzy: true, key: k, dist: bestD } : null;
+    };
+    for (let k = 0; k < Math.min(words.length, 3); k++) { const h = fuzzy(words.slice(k).join(' ')); if (h) return h; }
+    return null;
+  }
+
+  /* MIC dạng chữ -> {op, mic, fixed, onLadder}. Sửa lỗi OCR thường gặp: ] | l ! đọc thành 1, O thành 0, § thành 8, ≥/≤ thành >=/<=. */
+  function parseMicToken(tok) {
+    let t = String(tok || '').trim().replace(/\s+/g, '');
+    if (!t) return null;
+    t = t.replace(/≥/g, '>=').replace(/≤/g, '<=').replace(/=>/g, '>=').replace(/=</g, '<=');
+    const m = t.match(/^([<>]?)([=\-:~_]?)(.*)$/);
+    let fixed = false;
+    let op = m[1] ? m[1] + (m[2] ? '=' : '') : '=';
+    if (m[1] && m[2] && m[2] !== '=') fixed = true;
+    if (!m[1] && m[2] && m[2] !== '=') fixed = true;
+    const rest = m[3];
+    const r2 = rest.replace(/[\]|lI!]/g, '1').replace(/[Oo]/g, '0').replace(/§/g, '8').replace(/,/g, '.');
+    if (r2 !== rest) fixed = true;
+    if (!/^\d+(\.\d+)?$/.test(r2)) return null;
+    const mic = parseFloat(r2);
+    return { op, mic, fixed, onLadder: LADDER.has(mic) };
+  }
+
+  /* Cột Interpretation -> {v, fixed, syn}. Chữ cái đơn lẻ dễ nhầm (5 → S, l hoặc ! → I) chỉ được chấp nhận khi là token cuối dòng. */
+  function parseInterpToken(tok, isLast) {
+    const t0 = String(tok || '').replace(/^[({\[]+/, '').replace(/[)}.,;:*]+$/, '');
+    if (!t0) return null;
+    const U = t0.toUpperCase();
+    if (/^SYN-?[SR]$/.test(U)) return { v: U.slice(-1), fixed: false, syn: true, raw: U };
+    if (['S', 'I', 'R', 'SDD', 'NS'].includes(U)) return { v: U, fixed: t0 !== U };
+    if (U === 'SSD') return { v: 'SDD', fixed: true };
+    const f = fold(t0).toLowerCase();
+    if (f === 'nhay') return { v: 'S', fixed: false };
+    if (f === 'khang') return { v: 'R', fixed: false };
+    if (isLast && /^[5$]$/.test(t0)) return { v: 'S', fixed: true };
+    if (isLast && /^[l!1]$/.test(t0)) return { v: 'I', fixed: true };
+    return null;
+  }
+
+  let _genera = null;
+  const knownGenera = () => (_genera = _genera || Array.from(new Set([].concat(ENT_GENERA, NONFERM_GENERA, GRAMPOS_OTHER, ANAEROBE_GENERA, FUNGI_GENERA,
+    ['acinetobacter', 'staphylococcus', 'streptococcus', 'enterococcus', 'haemophilus', 'neisseria', 'salmonella', 'shigella', 'aeromonas', 'vibrio', 'moraxella', 'helicobacter', 'pasteurella', 'campylobacter', 'kingella', 'stenotrophomonas', 'legionella', 'mycobacterium', 'brucella']))));
+
+  /* Tên vi khuẩn từ OCR: sửa chi (genus) đọc lệch 1–2 ký tự (ví dụ "4cinetobacter" → "Acinetobacter"). Trả về cả chỗ đã sửa để báo cho KTV. */
+  function cleanOrganism(raw) {
+    let s = String(raw || '').replace(/[|\[\]_~*#]/g, ' ').replace(/\s+/g, ' ').trim().replace(/[.,;:]+$/, '');
+    if (!s) return { name: '', fixed: null };
+    const w = s.split(' ');
+    const g0 = w[0].toLowerCase();
+    const gens = knownGenera();
+    let fixed = null;
+    if (!gens.includes(g0.replace(/[^a-z]/g, ''))) {
+      let best = null, bestD = 99, second = 99;
+      const allow = g0.length >= 8 ? 2 : 1;
+      gens.forEach((g) => { const d = lev(g0, g); if (d > allow) return; if (d < bestD) { second = bestD; best = g; bestD = d; } else if (d < second) second = d; });
+      if (best && bestD < second) { fixed = { from: w[0], to: best[0].toUpperCase() + best.slice(1) }; w[0] = fixed.to; }
+    }
+    if (!fixed) w[0] = w[0][0].toUpperCase() + w[0].slice(1).toLowerCase();
+    for (let i = 1; i < w.length; i++) if (/^[A-Z][a-z]+$/.test(w[i]) && i === 1) w[i] = w[i].toLowerCase();
+    return { name: w.join(' '), fixed };
+  }
+
+  /* Phát hiện định dạng văn bản: 'vitek' (báo cáo Vitek 2 tiếng Anh), 'lis' (phiếu của khoa), hoặc ''. */
+  function detectFormat(text) {
+    const f = fold(String(text || '')).toLowerCase();
+    const lis = /ket\s*qua\s*xet\s*nghiem\s*vi\s*sinh|ch\S{0,3}ng\s*v\S{0,2}\s*sinh\s*:|khang\s*sinh\s*do\s*:/.test(f);
+    const vit = /selected organism|microbiology chart report|susceptibility information/.test(f);
+    if (lis && !vit) return 'lis';
+    if (vit && !lis) return 'vitek';
+    if (lis && vit) return 'vitek';
+    return '';
+  }
+
+  const DAY_OK = (d, m, y) => d >= 1 && d <= 31 && m >= 1 && m <= 12 && y >= 1990 && y <= 2100;
+  const pad2 = (n) => String(n).padStart(2, '0');
+
+  function parseLabReport(raw, opts) {
+    opts = opts || {};
+    const orig = String(raw || '').replace(/\u00a0/g, ' ').replace(/\r/g, '');
+    const lines = orig.split('\n').map((l) => l.replace(/[ \t]+/g, ' ').trim()).filter((l) => l !== '');
+    const JOINED = lines.join('\n');
+    const FJ = fold(JOINED);
+    const OJ = FJ.length === JOINED.length ? JOINED : FJ;
+    const warns = [];
+    const warn = (k, text) => { if (!warns.some((w) => w.k === k && w.text === text)) warns.push({ k, text }); };
+
+    const STOP = '(?:\\s+(?:nam\\s*sinh|gioi\\s*tinh|khoa\\s*phong|bac\\s*si\\s*dieu\\s*tri|doi\\s*tuong|chan\\s*doan|loai\\s*mau|dia\\s*chi|yeu\\s*cau\\s*vi\\s*sinh|ket\\s*qua\\s*cay|ch\\S{0,3}ng\\s*v\\S{0,2}\\s*sinh|ho\\s*ten|ma\\s*bn|stt)\\s*:|\\s+\\S{1,3}i\\s+t\\S{2,6}\\s*:|\\n|$)';
+    const field = (labelSrc) => {
+      const re = new RegExp('(?:^|\\s)(?:' + labelSrc + ')[ \\t]*:[ \\t]*?(.*?)(?=' + STOP + ')', 'i');
+      const m = re.exec(FJ);
+      if (!m) return '';
+      const start = m.index + m[0].length - m[1].length;
+      return OJ.slice(start, start + m[1].length).trim();
+    };
+    const fpick = (re) => { const m = re.exec(FJ); return m ? m[1] : ''; };
+
+    const iso0 = {
+      format: 'lis',
+      patientName: field('ho\\s*ten').replace(/[^A-Za-zÀ-ỹĐđ' .\-]/g, ' ').replace(/\s+/g, ' ').trim(),
+      patientId: fpick(/ma\s*bn\s*:?\s*(\d{4,})/i),
+      labId: fpick(/\bstt\s*:?\s*([0-9A-Za-z][0-9A-Za-z\-\/]{3,})/i),
+      isolateNo: '', printed: '', aesConfidence: '', hospital: '',
+      location: field('khoa\\s*phong'),
+      physician: field('bac\\s*si\\s*dieu\\s*tri'),
+      diagnosis: field('chan\\s*doan'),
+      address: field('dia\\s*chi'),
+      source: '',
+      sex: '', yob: null, age: '', performedDmy: '', performedTime: '', readAt: '', culture: '',
+    };
+    // bác sĩ điều trị xuống dòng: "Bs A/ Bs" + dòng kế tiếp "B"
+    if (iso0.physician) {
+      const li = lines.findIndex((l) => /bac\s*si\s*dieu\s*tri/i.test(fold(l)));
+      const nxt = li >= 0 ? lines[li + 1] : '';
+      if (nxt && nxt.indexOf(':') < 0 && nxt.length <= 40 && /(\/|\bbs\.?|,)\s*$/i.test(fold(iso0.physician))) iso0.physician += ' ' + nxt;
+    }
+    const yob = parseInt(fpick(/nam\s*sinh\s*:?\s*(\d{4})/i), 10);
+    if (yob >= 1900 && yob <= 2100) iso0.yob = yob;
+    const sx = fpick(/gioi\s*tinh\s*:?\s*(nam|nu)\b/i).toLowerCase();
+    iso0.sex = sx === 'nam' ? 'NAM' : sx === 'nu' ? 'NỮ' : '';
+    // thời gian thực hiện: ngày giờ đầu tiên của phiếu
+    const head = FJ.slice(0, 400);
+    const dm = head.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})\s+(\d{1,2})[:.](\d{2})/);
+    if (dm && DAY_OK(+dm[1], +dm[2], +dm[3])) { iso0.performedDmy = `${pad2(dm[1])}/${pad2(dm[2])}/${dm[3]}`; iso0.performedTime = `${pad2(dm[4])}:${dm[5]}`; }
+    const rd = FJ.match(/(\d{1,2})\s*gio\s*(\d{1,2})\s*phut[\s,]*ngay\s*(\d{1,2})\s*thang\s*(\d{1,2})\s*nam\s*(\d{4})/i);
+    if (rd && DAY_OK(+rd[3], +rd[4], +rd[5])) iso0.readAt = `${pad2(rd[3])}/${pad2(rd[4])}/${rd[5]} ${pad2(rd[1])}:${pad2(rd[2])}`;
+    const refYear = iso0.performedDmy ? +iso0.performedDmy.slice(-4) : iso0.readAt ? +iso0.readAt.slice(6, 10) : new Date().getFullYear();
+    if (iso0.yob) iso0.age = Math.max(0, refYear - iso0.yob);
+    const cult = fold(field('ket\\s*qua\\s*cay')).toLowerCase();
+    iso0.culture = /am\s*tinh|khong\s*moc|no\s*growth|negative/.test(cult) ? 'negative' : /duong/.test(cult) ? 'positive' : '';
+
+    // bệnh phẩm: "Loại mẫu: X" nếu có giá trị, nếu không thì lấy trong ngoặc cuối dòng "Yêu cầu vi sinh: ... (Cấy đàm)"
+    const st = field('loai\\s*mau');
+    const req = field('yeu\\s*cau\\s*vi\\s*sinh');
+    if (st && /[A-Za-zÀ-ỹ]{2,}/.test(st)) iso0.source = st;
+    else {
+      const pm = /\(([^()]*)\)\s*$/.exec(req);
+      if (pm) {
+        const inner = pm[1].trim(); const fi = fold(inner);
+        const m2 = /^(?:cay|nuoi\s*cay)\s+(.*)$/i.exec(fi);
+        iso0.source = m2 ? inner.slice(inner.length - m2[1].length) : inner;
+      }
+    }
+    iso0.request = req;
+
+    // các khối "Chủng vi sinh"
+    const ORG_RE = /ch\S{0,3}ng\s*v\S{0,2}\s*sinh\s*:/i;
+    const ABX_RE = /\s*khang\s*sinh\s*do\b\s*:?/i;
+    const FOOT_RE = /(bac\s*si\s*doc\s*ket\s*qua|tl\.?\s*truong\s*khoa|dien\s*giai\s*\/?\s*ghi\s*chu|ket\s*qua\s*chi\s*co\s*gia\s*tri)/i;
+    const orgIdx = [];
+    lines.forEach((l, i) => { if (ORG_RE.test(fold(l))) orgIdx.push(i); });
+    let footIdx = lines.length;
+    for (let i = (orgIdx[0] != null ? orgIdx[0] : 0); i < lines.length; i++) if (FOOT_RE.test(fold(lines[i]))) { footIdx = i; break; }
+
+    const blocks = [];
+    if (orgIdx.length) {
+      orgIdx.forEach((oi, k) => {
+        const line = lines[oi], fl = fold(line);
+        const m = ORG_RE.exec(fl);
+        let tail = (fl.length === line.length ? line : fl).slice(m.index + m[0].length).trim();
+        let region = [];
+        const ab = ABX_RE.exec(fold(tail));
+        if (ab) { region.push(tail.slice(ab.index + ab[0].length)); tail = tail.slice(0, ab.index); }
+        const end = k + 1 < orgIdx.length ? orgIdx[k + 1] : footIdx;
+        for (let i = oi + 1; i < end; i++) region.push(lines[i]);
+        blocks.push({ orgText: tail, region });
+      });
+    } else {
+      // không thấy nhãn "Chủng vi sinh": tìm dòng bắt đầu bằng tên chi vi khuẩn quen thuộc
+      const gens = knownGenera();
+      let oi = lines.findIndex((l) => { const w = l.replace(/^[^A-Za-z]+/, '').split(' ')[0].toLowerCase(); return w.length > 5 && gens.some((g) => lev(w, g) <= (w.length >= 8 ? 2 : 1)) && /^[A-Za-z0-9]+ [a-z]{3,}/.test(l.replace(/^[^A-Za-z0-9]+/, '')); });
+      if (oi >= 0) warn('org', 'Không thấy nhãn "Chủng vi sinh": tên vi khuẩn được đoán từ dòng "' + lines[oi] + '".');
+      const end = footIdx;
+      blocks.push({ orgText: oi >= 0 ? lines[oi] : '', region: lines.slice(oi >= 0 ? oi + 1 : 0, end) });
+    }
+
+    const isos = blocks.map((blk) => {
+      const iso = Object.assign({}, iso0, { results: [], quals: {}, unknown: [] });
+      const co = cleanOrganism(blk.orgText);
+      iso.organism = co.name;
+      const w = warns.slice();
+      const wn = (k, text) => { if (!w.some((x) => x.k === k && x.text === text)) w.push({ k, text }); };
+      if (co.fixed) wn('org', `Tên vi khuẩn "${co.fixed.from}" được sửa thành "${co.fixed.to}" (đọc lệch): kiểm tra lại với phiếu gốc.`);
+      if (!iso.organism) wn('org', 'Không đọc được tên vi khuẩn (dòng "Chủng vi sinh").');
+      iso.orgFixed = !!co.fixed;
+
+      const seen = new Set();
+      const addRec = (nameTokens, mic, ip, rawLine) => {
+        const nameRaw = nameTokens.join(' ').replace(/^[|\[\]'’`!_.,;:~\-\s]+/, '').trim();
+        if (!nameRaw) { wn('skip', `Dòng "${rawLine}" có MIC nhưng không đọc được tên thuốc.`); return; }
+        const hit = matchDrug(nameRaw);
+        if (!hit || hit.qual) {
+          if (hit && hit.qual) return;
+          if (!/[A-Za-z]{4,}/.test(nameRaw)) return;
+          iso.unknown.push({ name: nameRaw, raw: `${mic.op} ${mic.mic} ${ip ? ip.v : ''}`.trim(), rec: { id: null, rawName: nameRaw, op: mic.op, mic: mic.mic, vitek: ip ? ip.v : '', flags: '' } });
+          wn('unknown', `Thuốc "${nameRaw}" không có trong từ điển của app, nên chỉ được ghi nguyên.`);
+          return;
+        }
+        const nm = drugName(hit.id);
+        if (seen.has(hit.id)) { wn('dup', `${nm} xuất hiện hai lần; chỉ giữ dòng đầu.`); return; }
+        seen.add(hit.id);
+        const rec = { id: hit.id, rawName: nameRaw, op: mic.op, mic: mic.mic, vitek: ip ? ip.v : '', flags: '', suspect: false };
+        if (hit.fuzzy) { rec.suspect = true; wn('name', `Tên thuốc "${nameRaw}" được hiểu là ${nm} (đọc lệch).`); }
+        if (mic.fixed) { rec.suspect = true; wn('mic', `${nm}: MIC đã được sửa ký tự OCR thành ${fmtMic(mic.op, mic.mic)}.`); }
+        if (!mic.onLadder) { rec.suspect = true; wn('ladder', `${nm}: MIC ${fmtMic(mic.op, mic.mic)} không nằm trong dãy pha loãng thường gặp, có thể đọc sai.`); }
+        if (!ip) { rec.suspect = true; wn('interp', `${nm}: không đọc được cột Interpretation (S/I/R); app vẫn diễn giải theo MIC.`); }
+        else if (ip.fixed) { rec.suspect = true; wn('interp', `${nm}: ký tự S/I/R đã được sửa thành ${ip.v} (đọc lệch).`); }
+        iso.results.push(rec);
+      };
+
+      let carry = [];
+      blk.region.forEach((rawLine) => {
+        let line = rawLine; const fl = fold(line);
+        const fm = FOOT_RE.exec(fl);
+        if (fm) line = line.slice(0, fm.index);
+        const tokens = line.split(' ').filter((t) => t && !/^[|¦\\_~]+$/.test(t));
+        if (tokens.length) tokens[0] = tokens[0].replace(/^[|\[\]'’`!_.,;:~]+/, '') || tokens[0];
+        const tk = tokens.filter((t) => t !== '');
+        const used = [];
+        let prevEnd = 0; let any = false;
+        for (let j = 0; j < tk.length; j++) {
+          const lastish = tk.slice(j + 1).every((t) => /^[|\]\[!_.:;~\-]*$/.test(t));
+          const ip = parseInterpToken(tk[j], lastish);
+          if (!ip) continue;
+          if (ip.syn) {
+            const nameTokens = tk.slice(prevEnd, j);
+            const hit = matchDrug(nameTokens.join(' '));
+            if (hit && (hit.id === 'GENHL' || hit.id === 'STRHL') && !seen.has(hit.id)) { seen.add(hit.id); iso.results.push({ id: hit.id, rawName: nameTokens.join(' '), op: '=', mic: null, micRaw: ip.raw, vitek: ip.v, flags: '' }); any = true; prevEnd = j + 1; }
+            continue;
+          }
+          // MIC: lùi từ ngay trước cột Interpretation, bỏ qua ký tự rác lẻ (đường kẻ bảng hay bị đọc thành ] | T …);
+          // một ký tự lẻ như ] chỉ được coi là MIC "1" khi không còn ứng viên nào có chữ số
+          let mic = null, mstart = -1;
+          for (let k = j - 1; k >= prevEnd && k >= j - 3; k--) {
+            const t = tk[k];
+            if ((/\d/.test(t) || /^[<>≤≥=]/.test(t)) && parseMicToken(t)) { mic = parseMicToken(t); mstart = k; break; }
+            if (!/^[A-Za-z|!\]\[:;.~\-]$/.test(t)) break;
+          }
+          if (!mic && j - 1 >= prevEnd && /^[lI!|\]]$/.test(tk[j - 1])) { mic = parseMicToken(tk[j - 1]); mstart = j - 1; }
+          if (!mic) continue;
+          if (mstart - 1 >= prevEnd && /^[<>≤≥=\-:~]{1,2}$/.test(tk[mstart - 1]) && !/^[<>≤≥=]/.test(tk[mstart])) { const m2 = parseMicToken(tk[mstart - 1] + tk[mstart]); if (m2) { mic = m2; mstart -= 1; } }
+          let nameTokens = tk.slice(prevEnd, mstart);
+          if (!nameTokens.length && carry.length) nameTokens = carry;
+          addRec(nameTokens, mic, ip, rawLine);
+          any = true; prevEnd = j + 1; carry = [];
+        }
+        // dòng có tên thuốc + MIC nhưng không đọc được cột Interpretation
+        if (!any && tk.length >= 2) {
+          let end = tk.length;
+          while (end > 1 && /^[|\]\[!_.:;~\-]+$/.test(tk[end - 1])) end--;
+          let mic = parseMicToken(tk[end - 1]); let ms = end - 1;
+          if (mic && ms - 1 >= 0 && /^[<>≤≥=\-:~]{1,2}$/.test(tk[ms - 1]) && !/^[<>≤≥=]/.test(tk[ms])) { const m2 = parseMicToken(tk[ms - 1] + tk[ms]); if (m2) { mic = m2; ms -= 1; } }
+          if (mic && matchDrug(tk.slice(0, ms).join(' '))) { addRec(tk.slice(0, ms), mic, null, rawLine); any = true; }
+          else {
+            // trường hợp ESBL / cefoxitin screen / D-test: "Tên POS" hoặc "Tên NEG"
+            const q = /^(POS|NEG)[+\-]?$/i.exec(tk[end - 1] || '');
+            const qh = q && tk.length >= 2 ? matchDrug(tk.slice(0, end - 1).join(' ')) : null;
+            if (qh && qh.qual) { iso.quals[qh.id] = q[1].toUpperCase(); any = true; }
+          }
+        }
+        if (!any) {
+          // dòng chỉ có tên thuốc (mất cột giá trị) cần báo cho KTV
+          const nm = tk.join(' ');
+          const hit = tk.length && tk.length <= 3 && !/\d/.test(nm) ? matchDrug(nm) : null;
+          if (hit && !hit.qual) wn('skip', `${drugName(hit.id)}: thấy tên thuốc nhưng không đọc được MIC và kết quả; hãy nhập lại dòng này.`);
+          carry = tk.length <= 4 && !/\d/.test(nm) ? tk : [];
+        } else carry = [];
+      });
+      iso.readWarnings = w;
+      if (opts.ocr) iso.ocr = { used: true, passes: 1, conflicts: [] };
+      return iso;
+    });
+    return isos;
+  }
+
+  /* Tự nhận dạng định dạng rồi đọc. Trả về mảng chủng (mỗi chủng có ít nhất một kết quả hoặc một dòng ESBL/screen). */
+  function parseReport(raw, opts) {
+    const text = String(raw || '');
+    const fmt = detectFormat(text);
+    let out = [];
+    if (fmt === 'vitek') { const i = parseVitekText(text); i.format = 'vitek'; out = [i]; }
+    else if (fmt === 'lis') out = parseLabReport(text, opts);
+    else {
+      const v = parseVitekText(text); v.format = 'vitek';
+      const l = parseLabReport(text, opts);
+      const nl = l.reduce((s, i) => s + i.results.length, 0);
+      out = nl > v.results.length ? l : [v];
+    }
+    return out.filter((i) => i.results.length || Object.keys(i.quals || {}).length || (i.culture === 'negative'));
+  }
+
+  /* Gộp nhiều lần OCR của cùng một phiếu (độ phân giải khác nhau): lấy hợp các dòng; khi các lần đọc khác nhau thì
+     chọn giá trị được nhiều lần đọc đồng ý nhất (hòa thì ưu tiên lần đọc không bị sửa ký tự, rồi lần đọc đầu) và ghi lại chỗ khác nhau. */
+  function mergeReads(list) {
+    const reads = (list || []).filter(Boolean);
+    if (!reads.length) return null;
+    const base = JSON.parse(JSON.stringify(reads[0]));
+    const N = reads.length;
+    base.ocr = Object.assign({ used: true, conflicts: [] }, base.ocr || {}, { passes: N });
+    base.ocr.conflicts = [];
+    base.readWarnings = (base.readWarnings || []).slice();
+    const keyOf = (r) => `${r.op}|${r.mic}|${r.vitek || ''}`;
+    const fmt = (r) => `${r.micRaw || fmtMic(r.op, r.mic)} ${r.vitek || '?'}`;
+    const per = {}; const order = [];
+    reads.forEach((rd) => (rd.results || []).forEach((r) => { if (!per[r.id]) { per[r.id] = []; order.push(r.id); } per[r.id].push(r); }));
+    base.results = order.map((id) => {
+      const recs = per[id];
+      const groups = {};
+      recs.forEach((r, i) => { const k = keyOf(r); (groups[k] = groups[k] || { n: 0, clean: 0, first: i, rec: null }); const g = groups[k]; g.n++; if (!r.suspect) { g.clean++; if (!g.rec || g.rec.suspect) g.rec = r; } if (!g.rec) g.rec = r; });
+      const gs = Object.values(groups).sort((x, y) => y.n - x.n || y.clean - x.clean || x.first - y.first);
+      const best = gs[0];
+      const chosen = JSON.parse(JSON.stringify(best.rec));
+      if (gs.length > 1) base.ocr.conflicts.push({ id, name: drugName(id), a: fmt(chosen), b: gs.slice(1).map((g) => fmt(g.rec)).join(' hoặc '), used: fmt(chosen) });
+      chosen.suspect = best.clean === 0;
+      if (recs.length < N) { chosen.suspect = true; base.readWarnings.push({ k: 'single', text: `${drugName(id)} chỉ thấy ở ${recs.length}/${N} lần đọc: kiểm tra kỹ dòng này.` }); }
+      return chosen;
+    });
+    const warnHas = (t) => base.readWarnings.some((x) => x.text === t);
+    for (let p = 1; p < N; p++) {
+      const o = reads[p];
+      Object.keys(o.quals || {}).forEach((k) => { if (!(k in base.quals)) base.quals[k] = o.quals[k]; });
+      (o.readWarnings || []).forEach((w) => { if (!warnHas(w.text)) base.readWarnings.push(w); });
+      ['patientId', 'labId', 'location', 'physician', 'diagnosis', 'address', 'source', 'sex', 'performedDmy', 'performedTime', 'readAt', 'culture', 'request'].forEach((k) => { if (!base[k] && o[k]) base[k] = o[k]; });
+      if (!base.yob && o.yob) { base.yob = o.yob; base.age = o.age; }
+      const nonAscii = (str) => (String(str || '').match(/[^\x00-\x7F]/g) || []).length;
+      if (o.patientName && (!base.patientName || (fold(o.patientName).toLowerCase() === fold(base.patientName).toLowerCase() && nonAscii(o.patientName) > nonAscii(base.patientName)))) base.patientName = o.patientName;
+      if (o.organism && base.organism && o.organism.toLowerCase() !== base.organism.toLowerCase()) {
+        base.ocr.conflicts.push({ id: 'ORG', name: 'Tên vi khuẩn', a: base.organism, b: o.organism, used: base.organism });
+        if (base.orgFixed && !o.orgFixed) { base.organism = o.organism; base.orgFixed = false; }
+      } else if (o.organism && !base.organism) base.organism = o.organism;
+    }
+    return base;
+  }
+
+  /* Mục "phải đối chiếu với phiếu gốc" cho chủng đọc bằng OCR; chặn duyệt cho tới khi KTV xác nhận. */
+  function ocrCheck(iso) {
+    const o = iso && iso.ocr;
+    if (!o || !o.used) return null;
+    const details = [];
+    (o.conflicts || []).forEach((c) => details.push(`${c.name}: hai lần đọc khác nhau (${c.a} và ${c.b}); đang dùng ${c.used || c.a}.`));
+    (iso.readWarnings || []).forEach((w) => details.push(w.text));
+    details.push('Họ tên, năm sinh, khoa, chẩn đoán và bệnh phẩm cũng đọc bằng OCR; dấu tiếng Việt hay sai (ví dụ DÂN thành DAN). Đối chiếu trước khi in phiếu.');
+    return { id: 'ocr', sev: 'confirm', block: true, drugs: [], details,
+      title: 'Kết quả đọc từ ảnh scan (OCR): phải đối chiếu từng dòng với phiếu gốc',
+      why: 'OCR có thể nhầm chữ số (ví dụ 1 và l, 8 và §), bỏ sót dòng hoặc nhầm S/I/R. Một MIC sai làm diễn giải CLSI/EUCAST sai theo, và app không thể tự biết. Ảnh gốc và bảng đã đọc nằm ở khung "Đối chiếu với ảnh scan" phía trên; sửa trực tiếp ở đó nếu có chỗ sai.',
+      ref: '', action: 'So từng dòng (tên thuốc, MIC, S/I/R), tên vi khuẩn và số lượng dòng với phiếu gốc. Sửa chỗ sai rồi mới xác nhận; sửa bất kỳ dòng nào sẽ tự bỏ xác nhận.',
+      reasons: ['Đã đối chiếu từng dòng với phiếu gốc, kết quả trên màn hình khớp hoàn toàn'] };
+  }
+
+  /* ------------------------------------------------------------------ */
   /* 3. Organism classification                                           */
   /* ------------------------------------------------------------------ */
   const ENT_GENERA = ['escherichia', 'klebsiella', 'enterobacter', 'citrobacter', 'proteus', 'serratia', 'morganella', 'providencia', 'hafnia', 'raoultella', 'pantoea', 'cronobacter', 'edwardsiella', 'yersinia', 'kluyvera', 'leclercia', 'lelliottia', 'shimwellia', 'cedecea', 'ewingella', 'moellerella', 'rahnella', 'tatumella', 'buttiauxella', 'obesumbacterium', 'plesiomonas'];
@@ -323,6 +720,8 @@
     ['CLSI', 'Appendix B (kháng tự nhiên)', 'ok', 'B1 (Enterobacterales), B2 (không lên men), B3 (tụ cầu), B4 (Enterococcus), phần Clostridium của B5. Novobiocin không có trên Vitek nên chỉ ghi chú.'],
     ['CLSI', 'Appendix C, D, F, H', 'no', 'Kiểm soát chất lượng, kháng sinh đồ tích lũy kỵ khí, ECV, điều chỉnh phương pháp MIC: chưa nạp.'],
     ['CLSI', 'Appendix E (SDD), Appendix G (xét nghiệm phân tử)', 'part', 'Dùng ý nghĩa SDD trên phiếu và quy tắc cefepime–carbapenemase (G3); phần còn lại của G chưa nạp.'],
+    ['Chung', 'Đầu vào: báo cáo Vitek 2 (PDF chữ) và phiếu kết quả vi sinh của khoa (LIS, tiếng Việt)', 'ok', 'Phiếu của khoa đọc được từ PDF chữ, dán văn bản, hoặc ảnh scan/ảnh chụp qua OCR chạy ngay trong trình duyệt (Tesseract.js, cần mạng để tải mô hình lần đầu). Đọc từ ảnh luôn phải được KTV đối chiếu với phiếu gốc trước khi duyệt.'],
+    ['Chung', 'OCR ảnh scan: độ chính xác', 'part', 'Đã thử trên một phiếu thật: kết quả OCR đổi theo độ phân giải (có lần sót dòng, có lần nhầm ký tự), nên app đọc hai lần ở hai độ phân giải rồi gộp và cảnh báo chỗ khác nhau. Chưa thử trên ảnh chụp nghiêng, mờ, nhiều trang hay phiếu nhiều chủng thật.'],
     ['Chung', 'Nấm (Candida, Cryptococcus, Aspergillus…)', 'ok', 'Theo yêu cầu: không có bảng diễn giải, kết quả được ghi nguyên như Vitek đã diễn giải; không chặn duyệt, không lọc, không kiểm tra. Thuốc kháng nấm không có cột trong file Excel KSNK nên chỉ nằm ở sheet "Ghi chu KTV".'],
     ['CLSI', 'Neisseria loài khác, vi khuẩn khác ngoài M100', 'no', 'CLSI M100 không có bảng (Aeromonas, Vibrio, Listeria… : M45). Dùng EUCAST nếu có, hoặc chọn nhóm khác / ghi nguyên kết quả Vitek.'],
     ['EUCAST', 'Enterobacterales, Pseudomonas, Stenotrophomonas, Acinetobacter', 'ok', 'Nạp từ bảng PDF, có biến thể dịch não tủy / nước tiểu cho các thuốc chính.'],
@@ -1780,6 +2179,7 @@
       // known drugs first, then drugs the app has no name for (e.g. antifungals, metronidazole): nothing may silently disappear
       rep.raw = iso.results.map((r) => ({ id: r.id, name: drugName(r.id), mic: r.micRaw || fmtMic(r.op, r.mic), vitek: r.vitek }))
         .concat((iso.unknown || []).filter((u) => u.rec).map((u, i) => ({ id: 'x' + i, name: u.name, mic: fmtMic(u.rec.op, u.rec.mic), vitek: u.rec.vitek })));
+      { const oc = ocrCheck(iso); rep.checks = oc ? [oc] : []; }
       return rep;
     }
     rep.group = G;
@@ -2170,6 +2570,7 @@
     rep.cliHold = cliHold;
     rep.clinical = clinicalComments(rep, org, by, quals, spec);
     rep.checks = buildChecks(rep, org, by, quals, mrs, intrinsicIds, cliHold, penHold, standard);
+    { const oc = ocrCheck(iso); if (oc) rep.checks.unshift(oc); }
     rep.treatment = treatmentInfo(rep, org, by);
     if (standard === 'eucast') {
       const at = EU_ATU[org.group] || {};
@@ -2239,7 +2640,7 @@
     return '\ufeff' + rows.map((r) => r.map(esc).join(',')).join('\r\n');
   }
 
-  const api = { COVERAGE, compareStandards, catLabel, EUCAST_EDITION, suggestGroups, GROUP_LIST, TIER_TEXT, HIDE_INFO, EDITION, DRUGS, GROUPS, FN, CAT_VI, SPECIMENS, DEFAULT_SETTINGS, parseVitekText, classifyOrganism, classify, catOf, bpText, buildReport, reportToText, reportToCsv, guessSpecimen, specLabel, drugName, fmtMic };
+  const api = { parseReport, parseLabReport, mergeReads, ocrCheck, detectFormat, matchDrug, COVERAGE, compareStandards, catLabel, EUCAST_EDITION, suggestGroups, GROUP_LIST, TIER_TEXT, HIDE_INFO, EDITION, DRUGS, GROUPS, FN, CAT_VI, SPECIMENS, DEFAULT_SETTINGS, parseVitekText, classifyOrganism, classify, catOf, bpText, buildReport, reportToText, reportToCsv, guessSpecimen, specLabel, drugName, fmtMic };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.ASTEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

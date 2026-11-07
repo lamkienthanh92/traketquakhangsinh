@@ -23,6 +23,7 @@ const html = src('template.html')
   .replace('/*BARCODE*/', () => src('barcode.js'))
   .replace('/*KSNK*/', () => src('ksnk.js'))
   .replace('/*DOCX*/', () => src('docx.js'))
+  .replace('/*OCR*/', () => src('ocr.js'))
   .replace('/*SAMPLES*/', () => sampleJs)
   .replace('/*UI*/', () => ui.replace(/<\/script/g, '<\\/script'));
 

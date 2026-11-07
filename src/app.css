@@ -394,3 +394,23 @@ table.fm-res td.un, table.fm-res td.ins { font-size: 12px; }
 .cov-g li { overflow-wrap: anywhere; }
 
 .supp-l { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; font-size: 13px; } .supp-l .ref { color: var(--ink2); font-size: 12px; }
+
+/* ---- đối chiếu OCR ---- */
+.ocrp { border: 1px solid var(--line); border-left: 5px solid var(--i); border-radius: 8px; background: var(--panel); padding: 10px 12px; margin-bottom: 12px; }
+.ocrp h3 { margin: 0 0 8px; font-size: 15px; }
+.ocrp-g { display: grid; grid-template-columns: minmax(160px, 36%) 1fr; gap: 12px; align-items: start; }
+.ocrp-g.big { grid-template-columns: 1fr; }
+.ocrp-img img { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; cursor: zoom-in; background: #fff; }
+.ocrp-g.big .ocrp-img img { cursor: zoom-out; }
+.ocrp-t { min-width: 0; }
+.ocrp-tb { margin: 6px 0; width: 100%; }
+.ocrp-tb th { text-align: left; font-size: 12px; color: var(--ink2); font-weight: 500; padding: 2px 10px 2px 0; }
+.ocrp-tb td { padding: 2px 10px 2px 0; vertical-align: middle; }
+.ocrp-tb input.w-s { width: 64px; }
+.ocrp-tb tr.sus td:first-child { background: rgba(255, 200, 0, .18); }
+.sus-m { color: #b45309; }
+.ocrp-add { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+.chk-d { margin: 4px 0 4px 18px; padding: 0; font-size: 13px; }
+.chk-d li { margin: 2px 0; overflow-wrap: anywhere; }
+.ocr-st { margin: 6px 0 0; }
+@media (max-width: 720px) { .ocrp-g { grid-template-columns: 1fr; } }

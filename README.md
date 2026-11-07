@@ -8,6 +8,16 @@
 
 Mở `dist/index.html` bằng trình duyệt (cần internet: React và pdf.js được tải từ cdnjs). Bấm **"Thử với 5 báo cáo mẫu"** để xem ngay, hoặc thả PDF Vitek vào. Dữ liệu chỉ xử lý trong trình duyệt, không gửi đi đâu.
 
+## Đọc phiếu kết quả vi sinh của khoa (PDF scan / ảnh)
+
+Phiếu "PHIẾU KẾT QUẢ XÉT NGHIỆM VI SINH" của khoa (Chủng vi sinh + bảng Kháng sinh | MIC | Interpretation) được nhận dạng tự động, không cần chọn loại. Có ba đường vào:
+
+- **PDF có lớp chữ** hoặc **dán văn bản**: đọc thẳng, không OCR.
+- **PDF scan hoặc ảnh (jpg/png/webp)**: OCR chạy trong trình duyệt (Tesseract.js 5.1.1, tiếng Việt + Anh). Mỗi trang được đọc 3 lần ở cạnh dài 2400, 2200 và 2000 px rồi gộp bằng biểu quyết (`src/ocr.js`, `E.mergeReads`). Các mức này chọn theo phép đo trên một phiếu thật khổ A4: 2400 đọc đủ 11/11 dòng, 2000 và 2200 sót 1 dòng, 1800 sót 3 dòng, 1400 nhầm ≤ thành <, từ 2800 trở lên đọc hỏng bảng.
+- Chủng đọc bằng OCR **luôn bị chặn duyệt** cho tới khi KTV đối chiếu với phiếu gốc ở khung "Đối chiếu với ảnh scan" (ảnh gốc cạnh bảng có thể sửa, xóa, thêm dòng). Sửa bất kỳ ô nào sẽ tự bỏ xác nhận và bỏ duyệt. Việc xác nhận được ghi vào sheet "Ghi chu KTV".
+
+Lưu ý: họ tên, năm sinh, khoa, chẩn đoán cũng do OCR đọc, dấu tiếng Việt hay sai; luôn kiểm tra trước khi in phiếu. Lần OCR đầu cần internet để tải thư viện và mô hình ngôn ngữ từ jsDelivr (ảnh và văn bản không gửi đi đâu).
+
 ## Tính năng chính
 
 - Đọc nhiều PDF Vitek một lúc (hoặc dán văn bản). Tự nhận vi khuẩn, MIC, kết quả và các dòng ESBL, cefoxitin screen, ICR.
@@ -27,7 +37,7 @@ Cần Node.js ≥ 20.
 ```bash
 npm install        # chỉ cài esbuild (dùng để biên dịch JSX)
 npm run build      # tạo dist/index.html
-npm test           # 35 test bằng dữ liệu giả
+npm test           # 46 test bằng dữ liệu giả
 ```
 
 ## Cấu trúc
@@ -36,6 +46,7 @@ npm test           # 35 test bằng dữ liệu giả
 |---|---|
 | `src/engine.js` | Parser Vitek, nhóm vi khuẩn, breakpoint CLSI/EUCAST, quy tắc báo cáo, kiểm tra bất thường |
 | `src/ui.jsx` | Giao diện React (một component App) |
+| `src/ocr.js` | OCR trong trình duyệt (Tesseract.js), đọc nhiều lần ở nhiều độ phân giải |
 | `src/ksnk.js` | Ghi file Excel KSNK (tự viết, không phụ thuộc thư viện) |
 | `src/docx.js` | Ghi file Word (tự viết) |
 | `src/barcode.js` | Mã vạch Code 128 (SVG và PNG) |
@@ -59,6 +70,9 @@ Sửa breakpoint hoặc thêm nhóm vi khuẩn: xem `docs/NGUON-DU-LIEU.md` (s�
 - Giấy phép cho mã nguồn: **chưa chọn**. Người chủ repo tự quyết định.
 
 ## Giới hạn đã biết
+
+- OCR: đã thử trên một phiếu scan thật và trên Chromium headless; chưa thử ảnh chụp nghiêng/mờ, phiếu nhiều trang hoặc nhiều chủng thật, Safari và điện thoại. Chức năng tự xoay ảnh 90°/270° khi không đọc được dòng nào chưa được kiểm thử. Kết quả OCR đổi theo độ phân giải (đã thấy sót dòng và nhầm ký tự) nên bắt buộc đối chiếu bằng mắt.
+- Phiếu của khoa: chỉ thử trên một mẫu (Acinetobacter, 11 thuốc). HLAR, ESBL, screen trên phiếu này chưa có mẫu thật.
 
 - Nấm và các vi khuẩn ngoài CLSI M100/EUCAST: app báo "chưa hỗ trợ"; kỹ thuật viên chọn nhóm khác (ngoại suy, có xác nhận) hoặc ghi nguyên kết quả Vitek. Xem `docs/COVERAGE.md` cho danh sách đầy đủ, gồm phần CLSI Table 3 (xét nghiệm bổ sung), đường kính vùng ức chế, EUCAST Expert Rules chưa nạp.
 - Các nhóm EUCAST trích tự động chưa được đối chiếu từng dòng với bản gốc.

@@ -28,6 +28,32 @@ async function extractPdfText(file) {
   return { stream, rows };
 }
 
+/* Đầu vào có thể là báo cáo Vitek (PDF chữ), phiếu kết quả của khoa (PDF chữ hoặc ảnh scan), hoặc văn bản dán. */
+const IMG_RE = /\.(jpe?g|png|webp|bmp|gif)$/i;
+const isImageFile = (f) => IMG_RE.test(f.name || '') || /^image\//.test(f.type || '');
+const sumRows = (arr) => arr.reduce((s, i) => s + i.results.length, 0);
+function parseTextSmart(t) {
+  // Vitek: giữ cách gộp hai kiểu đọc PDF như trước
+  if (E.detectFormat(t.stream) === 'vitek' || E.detectFormat(t.rows) === 'vitek') {
+    let iso = E.parseVitekText(t.stream);
+    const alt = E.parseVitekText(t.rows);
+    if (alt.results.length > iso.results.length) { alt.quals = { ...iso.quals, ...alt.quals }; iso = alt; } else iso.quals = { ...alt.quals, ...iso.quals };
+    iso.format = 'vitek';
+    return iso.results.length || Object.keys(iso.quals).length ? [iso] : [];
+  }
+  const a = E.parseReport(t.stream), b = E.parseReport(t.rows);
+  return sumRows(b) > sumRows(a) ? b : a;
+}
+// ghép các lần OCR của cùng một phiếu; chủng nào cũng được gắn cờ OCR để KTV phải đối chiếu
+function mergeOcrReads(texts) {
+  const reads = texts.map((t) => E.parseReport(t, { ocr: true })).filter((r) => r.length);
+  if (!reads.length) return [];
+  const n = reads[0].length;
+  if (reads.every((r) => r.length === n)) return Array.from({ length: n }, (_, i) => E.mergeReads(reads.map((r) => r[i])));
+  const best = reads.slice().sort((a, b) => sumRows(b) - sumRows(a))[0];
+  return best.map((iso) => { const m = E.mergeReads([iso]); m.readWarnings.push({ k: 'passes', text: 'Các lần đọc cho số chủng khác nhau; chỉ dùng lần đọc có nhiều dòng nhất.' }); return m; });
+}
+
 async function copyText(t) {
   try { await navigator.clipboard.writeText(t); return true; } catch (e) {
     try {
@@ -224,6 +250,7 @@ function ReportSheet({ item, rep, onField, sheetRef, reviewer, showMic, showFn, 
           <input value={item.date} placeholder="dd/mm/yyyy" maxLength={10} onChange={(e) => onField({ date: e.target.value })} aria-label="Ngày lấy mẫu" className={`w-m${dateBad ? ' bad' : ''}`} />
           <input value={item.sampTime || ''} placeholder="hh:mm" maxLength={5} onChange={(e) => onField({ sampTime: e.target.value })} aria-label="Giờ lấy mẫu" className="w-s" />
           {printedDmy && !item.date && <button type="button" className="lnk inl" onClick={() => onField({ date: printedDmy })} title="Ngày in báo cáo trên Vitek – chỉ dùng nếu đúng là ngày lấy mẫu">dùng ngày in Vitek ({printedDmy})</button>}
+          {iso.performedDmy && !item.date && <button type="button" className="lnk inl" onClick={() => onField({ date: iso.performedDmy })} title="Ngày thực hiện ghi trên phiếu của khoa – chỉ dùng nếu đúng là ngày lấy mẫu">dùng ngày thực hiện trên phiếu ({iso.performedDmy})</button>}
           {dateBad && <span className="warn-t"> định dạng dd/mm/yyyy</span>}
         </Field>
         <Field label="Tình trạng mẫu" en="Sample status" print={item.sampleStatus}>
@@ -341,6 +368,7 @@ function CheckCard({ c, res, quals, onResolve, onQual }) {
     <li className={`chkc sv-${c.sev}`}>
       <div className="chk-h"><Pill kind={kind}>{lab}</Pill>{c.block && !(res && res.mode === 'confirmed') && <span className="blk">chặn duyệt</span>}<b>{c.title}</b></div>
       <p className="chk-w">{c.why}</p>
+      {c.details && c.details.length > 0 && <ul className="chk-d">{c.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
       <p className="chk-a"><b>Việc cần làm:</b> {c.action}</p>
       <p className="chk-r">{c.ref}</p>
       {c.input === 'icr' && (
@@ -481,11 +509,73 @@ function ComparePanel({ cmp, std }) {
   );
 }
 
-function KtvPanel({ item, rep, cmp, onResolve, onQual, onRestore, onHideRow, onPickGroup, onUseEucast }) {
+/* Khung đối chiếu cho chủng đọc từ ảnh scan: ảnh gốc cạnh bảng đã đọc, sửa trực tiếp được. */
+function OcrPanel({ item, onIso }) {
+  const iso = item.iso;
+  const [big, setBig] = useState(false);
+  const [add, setAdd] = useState({ id: '', op: '=', mic: '', v: '' });
+  const OPS = ['=', '<=', '>=', '<', '>'];
+  const setRes = (i, patch) => onIso((x) => ({ ...x, results: x.results.map((r, k) => (k === i ? { ...r, ...patch, suspect: false } : r)) }));
+  const delRes = (i) => onIso((x) => ({ ...x, results: x.results.filter((_, k) => k !== i) }));
+  const addRes = () => {
+    const mic = parseFloat(String(add.mic).replace(',', '.'));
+    if (!add.id || !(mic >= 0)) return;
+    onIso((x) => (x.results.some((r) => r.id === add.id) ? x : { ...x, results: [...x.results, { id: add.id, rawName: E.drugName(add.id), op: add.op, mic, vitek: add.v, flags: '', suspect: false }] }));
+    setAdd({ id: '', op: '=', mic: '', v: '' });
+  };
+  const free = Object.keys(E.DRUGS).filter((id) => !iso.results.some((r) => r.id === id)).sort((a, b) => E.drugName(a).localeCompare(E.drugName(b)));
+  const nSus = iso.results.filter((r) => r.suspect).length;
+  return (
+    <div className="ocrp no-print">
+      <h3>Đối chiếu với ảnh scan <span className="cnt">{iso.results.length} dòng đã đọc{nSus ? `, ${nSus} dòng cần xem kỹ` : ''}</span></h3>
+      <div className={`ocrp-g${big ? ' big' : ''}`}>
+        <div className="ocrp-img">
+          {item.preview ? <img src={item.preview} alt="Ảnh phiếu gốc (trang 1)" onClick={() => setBig(!big)} title="Bấm để phóng to hoặc thu nhỏ" /> : <p className="small">Không có ảnh xem trước.</p>}
+        </div>
+        <div className="ocrp-t">
+          <label className="fl inl">Vi khuẩn
+            <input value={iso.organism || ''} onChange={(e) => onIso((x) => ({ ...x, organism: e.target.value, orgFixed: false }))} aria-label="Tên vi khuẩn đã đọc" />
+          </label>
+          <table className="mini ocrp-tb">
+            <thead><tr><th>Thuốc</th><th>MIC</th><th>S/I/R</th><th /></tr></thead>
+            <tbody>
+              {iso.results.map((r, i) => (
+                <tr key={r.id} className={r.suspect ? 'sus' : ''}>
+                  <td>{E.drugName(r.id)}{r.suspect && <span className="sus-m" title="Dòng này OCR đọc không chắc chắn"> ⚠</span>}</td>
+                  {r.mic == null
+                    ? <td className="mono" colSpan={1}>{r.micRaw || ''}</td>
+                    : <td className="mono">
+                      <select value={r.op} onChange={(e) => setRes(i, { op: e.target.value })} aria-label={`Dấu MIC ${E.drugName(r.id)}`}>{OPS.map((o) => <option key={o} value={o}>{o === '=' ? '' : o === '<=' ? '≤' : o === '>=' ? '≥' : o}</option>)}</select>
+                      <input className="w-s" defaultValue={String(r.mic)} key={r.id + ':' + r.mic} onBlur={(e) => { const v = parseFloat(String(e.target.value).replace(',', '.')); if (v >= 0 && v !== r.mic) setRes(i, { mic: v }); else e.target.value = String(r.mic); }} aria-label={`MIC ${E.drugName(r.id)}`} inputMode="decimal" />
+                    </td>}
+                  <td><select value={r.vitek || ''} onChange={(e) => setRes(i, { vitek: e.target.value })} aria-label={`Kết quả ${E.drugName(r.id)}`}><option value="">?</option>{['S', 'SDD', 'I', 'R', 'NS'].map((v) => <option key={v} value={v}>{v}</option>)}</select></td>
+                  <td><button className="lnk" onClick={() => delRes(i)} title="Xóa dòng này (OCR đọc nhầm)">xóa</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="ocrp-add">
+            <span className="small">Thêm dòng bị sót:</span>
+            <select value={add.id} onChange={(e) => setAdd({ ...add, id: e.target.value })} aria-label="Thuốc bị sót"><option value="">chọn thuốc…</option>{free.map((id) => <option key={id} value={id}>{E.drugName(id)}</option>)}</select>
+            <select value={add.op} onChange={(e) => setAdd({ ...add, op: e.target.value })} aria-label="Dấu MIC">{OPS.map((o) => <option key={o} value={o}>{o === '=' ? '' : o === '<=' ? '≤' : o === '>=' ? '≥' : o}</option>)}</select>
+            <input className="w-s" value={add.mic} onChange={(e) => setAdd({ ...add, mic: e.target.value })} placeholder="MIC" inputMode="decimal" aria-label="MIC" />
+            <select value={add.v} onChange={(e) => setAdd({ ...add, v: e.target.value })} aria-label="S/I/R"><option value="">?</option>{['S', 'SDD', 'I', 'R', 'NS'].map((v) => <option key={v} value={v}>{v}</option>)}</select>
+            <button className="btn ghost" onClick={addRes} disabled={!add.id || !(parseFloat(String(add.mic).replace(',', '.')) >= 0)}>Thêm</button>
+          </div>
+          <p className="small">Sửa bất kỳ ô nào sẽ tự bỏ xác nhận OCR và bỏ duyệt; app tính lại ngay theo giá trị bạn nhập.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function KtvPanel({ item, rep, cmp, onResolve, onQual, onRestore, onHideRow, onPickGroup, onUseEucast, onIso }) {
   const quals = item.iso.quals || {};
   if (rep.unsupported) {
     return (
       <section className="ktv">
+        {item.iso.ocr && item.iso.ocr.used && <OcrPanel item={item} onIso={onIso} />}
+        {rep.checks.filter((c) => c.id === 'ocr').length > 0 && <ul className="chks">{rep.checks.filter((c) => c.id === 'ocr').map((c) => <CheckCard key={c.id} c={c} res={item.resolved && item.resolved[c.id]} quals={quals} onResolve={onResolve} onQual={onQual} />)}</ul>}
         {rep.needGroup && <GroupChooser item={item} rep={rep} onPick={onPickGroup} onUseEucast={onUseEucast} />}
         {!rep.needGroup && rep.asIs === 'fungus' && <div className="note n-info"><p><b>Nấm:</b> ghi nguyên kết quả Vitek đã diễn giải (theo yêu cầu của bệnh viện). App không lọc, không diễn giải lại và không kiểm tra bất thường; không chặn duyệt.</p></div>}
         {!rep.needGroup && rep.asIs !== 'fungus' && <div className="note n-warn"><p><b>Không áp bảng CLSI nào cho vi khuẩn này.</b> App không lọc, không diễn giải lại và không kiểm tra bất thường. Kết quả bên dưới là diễn giải gốc của Vitek; cần bác sĩ vi sinh hoặc labo tham chiếu xem trước khi trả. <button className="lnk" onClick={() => onPickGroup('', false)}>Chọn lại nhóm</button></p></div>}
@@ -497,6 +587,7 @@ function KtvPanel({ item, rep, cmp, onResolve, onQual, onRestore, onHideRow, onP
   const open = checks.filter((c) => c.block && !isResolved(item, c)).length;
   return (
     <section className="ktv" aria-label="Kiểm tra dành cho kỹ thuật viên">
+      {item.iso.ocr && item.iso.ocr.used && <OcrPanel item={item} onIso={onIso} />}
       <div className="ktv-sec">
         <h3>Việc cần làm trước khi duyệt {open > 0 ? <span className="bdg">{open} chặn duyệt</span> : <span className="cnt">không còn mục chặn duyệt</span>}</h3>
         {checks.length === 0 && <p className="small">Không phát hiện kết quả bất thường theo các quy tắc đã nạp. Vẫn cần đọc lại bảng bên dưới.</p>}
@@ -601,7 +692,7 @@ function ApproveBar({ item, rep, reviewer, onApprove, onUnapprove }) {
   if (!item.specVi) blockers.push('chọn bệnh phẩm');
   if (!reviewer.trim()) blockers.push('nhập tên KTV ở cột bên trái');
   if (rep.needGroup) blockers.push('chọn nhóm bảng CLSI (hoặc "không áp bảng nào") ở tab "KTV kiểm tra"');
-  const blocking = rep.unsupported ? [] : rep.checks.filter((c) => c.block);
+  const blocking = rep.unsupported ? rep.checks.filter((c) => c.id === 'ocr' && c.block) : rep.checks.filter((c) => c.block);
   const pending = blocking.filter((c) => isPending(item, c));
   const unresolved = blocking.filter((c) => !isResolved(item, c) && !isPending(item, c));
   if (pending.length) blockers.push(`làm lại ${pending.length} mục đã đánh dấu chờ làm lại`);
@@ -703,6 +794,7 @@ function App() {
   const [settings, setSettings] = useState(E.DEFAULT_SETTINGS);
   STDCUR.current = settings.standard || 'clsi';
   const [busy, setBusy] = useState(false);
+  const [ocrStatus, setOcrStatus] = useState('');
   const [msgs, setMsgs] = useState([]);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [paste, setPaste] = useState('');
@@ -725,12 +817,12 @@ function App() {
   useEffect(() => { document.documentElement.setAttribute('data-theme', 'light'); }, []);
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(''), 2600); return () => clearTimeout(t); }, [toast]);
 
-  const addIsolate = useCallback((iso, fileName) => {
+  const addIsolate = useCallback((iso, fileName, extra) => {
     const id = uid.current++;
     const specVi = guessViSpecimen(iso.source);
     const key = E.classifyOrganism(iso.organism).key;
     const stored = loadMap()[key];
-    const it = { uid: id, fileName, iso, groupOverride: stored || '', mappedRemembered: !!stored, specVi, specimen: SPEC_TO_ENGINE[specVi] || 'unknown', name: iso.patientName || '', age: '', sex: '', dept: iso.location || '', date: '', phone: '', address: '', diagnosis: '', reqDoctor: iso.physician || '', sampleStatus: 'Đạt', sampler: '', receiver: '', recvTime: '', sampTime: '', approved: false, approvedAt: '', forceShow: [], forceHide: [], resolved: {}, restored: {} };
+    const it = { uid: id, fileName, iso, groupOverride: stored || '', mappedRemembered: !!stored, specVi, specimen: SPEC_TO_ENGINE[specVi] || 'unknown', name: iso.patientName || '', age: iso.age === undefined || iso.age === null ? '' : String(iso.age), sex: iso.sex || '', dept: iso.location || '', date: '', phone: '', address: iso.address || '', diagnosis: iso.diagnosis || '', reqDoctor: iso.physician || '', preview: (extra && extra.preview) || '', sampleStatus: 'Đạt', sampler: '', receiver: '', recvTime: '', sampTime: '', approved: false, approvedAt: '', forceShow: [], forceHide: [], resolved: {}, restored: {} };
     setItems((p) => [...p, it]);
     setSel((s) => s == null ? id : s);
     return it;
@@ -739,19 +831,32 @@ function App() {
   const ingest = useCallback(async (files) => {
     setBusy(true);
     const problems = [];
+    let usedOcr = false;
     for (const f of files) {
       try {
-        let iso;
-        if (/\.pdf$/i.test(f.name) || f.type === 'application/pdf') {
-          const t = await extractPdfText(f);
-          iso = E.parseVitekText(t.stream);
-          const alt = E.parseVitekText(t.rows);
-          if (alt.results.length > iso.results.length) { alt.quals = { ...iso.quals, ...alt.quals }; iso = alt; } else iso.quals = { ...alt.quals, ...iso.quals };
-        } else iso = E.parseVitekText(await f.text());
-        if (!iso.results.length && !Object.keys(iso.quals).length) { problems.push(`${f.name}: không đọc được dòng kết quả kháng sinh nào (có thể không phải báo cáo Vitek 2 dạng văn bản).`); continue; }
-        addIsolate(iso, f.name);
+        const isPdf = /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
+        const isImg = isImageFile(f);
+        let isos = [], preview = '';
+        if (isPdf) isos = parseTextSmart(await extractPdfText(f));
+        else if (!isImg) isos = E.parseReport(await f.text());
+        // PDF scan (không có lớp chữ) hoặc ảnh chụp: đọc bằng OCR
+        if (!isos.length && (isPdf || isImg)) {
+          if (!window.AstOCR) throw new Error('Thiếu bộ OCR trong bản build này.');
+          usedOcr = true;
+          setOcrStatus(`${f.name}: đang chuẩn bị OCR…`);
+          const rd = await window.AstOCR.read(f, { onStatus: (m) => setOcrStatus(`${f.name}: ${m}`), score: (txt) => sumRows(E.parseReport(txt, { ocr: true })) });
+          preview = rd.preview;
+          isos = mergeOcrReads(rd.texts);
+        }
+        if (!isos.length) { problems.push(`${f.name}: không đọc được dòng kết quả kháng sinh nào (không phải báo cáo Vitek 2 hay phiếu kết quả vi sinh của khoa, hoặc ảnh quá mờ/nghiêng).`); continue; }
+        isos.forEach((iso) => {
+          if (!iso.results.length && !Object.keys(iso.quals || {}).length) problems.push(`${f.name}: phiếu ghi kết quả cấy ÂM TÍNH, không có kháng sinh đồ.`);
+          else addIsolate(iso, f.name, { preview });
+        });
       } catch (e) { problems.push(`${f.name}: ${e.message || e}`); }
     }
+    if (usedOcr && window.AstOCR) window.AstOCR.close();
+    setOcrStatus('');
     setMsgs(problems);
     setBusy(false);
   }, [addIsolate]);
@@ -763,9 +868,10 @@ function App() {
   };
 
   const analysePaste = () => {
-    const iso = E.parseVitekText(paste);
-    if (!iso.results.length) { setMsgs(['Không nhận diện được dòng kết quả nào trong văn bản đã dán.']); return; }
-    addIsolate(iso, 'văn bản dán'); setPaste(''); setPasteOpen(false); setMsgs([]);
+    const isos = E.parseReport(paste);
+    if (!isos.length) { setMsgs(['Không nhận diện được dòng kết quả nào trong văn bản đã dán (báo cáo Vitek 2 hoặc phiếu kết quả vi sinh của khoa).']); return; }
+    isos.forEach((iso) => { if (iso.results.length || Object.keys(iso.quals || {}).length) addIsolate(iso, 'văn bản dán'); });
+    setPaste(''); setPasteOpen(false); setMsgs(isos.some((i) => !i.results.length && i.culture === 'negative') ? ['Phiếu ghi kết quả cấy ÂM TÍNH, không có kháng sinh đồ.'] : []);
   };
 
   const cur = items.find((x) => x.uid === sel) || null;
@@ -779,6 +885,7 @@ function App() {
     update(cur.uid, (x) => ({ ...x, groupOverride: g, mappedRemembered: false, resolved: {} }));
   };
   const resolveCheck = (cid, payload) => update(cur.uid, (x) => { const r = { ...x.resolved }; if (payload) r[cid] = { ...payload, at: nowStamp() }; else delete r[cid]; return { ...x, resolved: r }; });
+  const editIso = (id, fn) => setItems((p) => p.map((x) => { if (x.uid !== id) return x; const r = { ...x.resolved }; delete r.ocr; return { ...x, iso: fn(x.iso), resolved: r, approved: false, approvedAt: '' }; }));
   const setQual = (key, val) => update(cur.uid, (x) => { const q = { ...(x.iso.quals || {}) }; if (val) q[key] = val; else delete q[key]; return { ...x, iso: { ...x.iso, quals: q } }; });
   const restoreDrug = (h, note) => update(cur.uid, (x) => ({ ...x, forceHide: x.forceHide.filter((k) => k !== h.id), forceShow: h.kind === 'manual' ? x.forceShow : [...new Set([...x.forceShow, h.id])], restored: h.kind === 'manual' ? x.restored : { ...x.restored, [h.id]: { at: nowStamp(), note: note === 'ok' ? '' : note, name: h.name } } }));
   const hideDrug = (id) => update(cur.uid, (x) => { const r = { ...x.restored }; delete r[id]; return { ...x, forceHide: [...new Set([...x.forceHide, id])], forceShow: x.forceShow.filter((k) => k !== id), restored: r }; });
@@ -804,13 +911,13 @@ function App() {
   };
   const unapproveCur = () => setItems((p) => p.map((x) => (x.uid === cur.uid ? { ...x, approved: false, approvedAt: '' } : x)));
   const nApproved = items.filter((x) => x.approved).length;
-  const blocksOf = (it, r) => (r.unsupported ? [] : r.checks.filter((c) => c.block));
+  const blocksOf = (it, r) => (r.unsupported ? r.checks.filter((c) => c.id === 'ocr' && c.block) : r.checks.filter((c) => c.block));
   const openBlocks = cur && curRep ? blocksOf(cur, curRep).filter((c) => !isResolved(cur, c)).length : 0;
   const doExcel = async () => {
     const entries = items.map((it, i) => ({ it, rep: reps[i] })).filter((x) => x.it.approved)
       .map(({ it, rep }) => ({
         date: it.date, name: it.name, dept: it.dept, age: it.age, sex: it.sex, specVi: it.specVi, iso: it.iso, rep, reviewer, approvedAt: it.approvedAt,
-        resolutions: (rep.unsupported ? [] : rep.checks.filter((c) => it.resolved[c.id] && it.resolved[c.id].mode === 'confirmed')).map((c) => `${c.title} → ${it.resolved[c.id].reason}${it.resolved[c.id].note ? ' (' + it.resolved[c.id].note + ')' : ''}`).join(' | '),
+        resolutions: (rep.unsupported ? rep.checks.filter((c) => c.id === 'ocr') : rep.checks).filter((c) => it.resolved[c.id] && it.resolved[c.id].mode === 'confirmed').map((c) => `${c.title} → ${it.resolved[c.id].reason}${it.resolved[c.id].note ? ' (' + it.resolved[c.id].note + ')' : ''}`).join(' | '),
         restored: Object.keys(it.restored || {}).filter((id) => !rep.unsupported && rep.reported.some((r) => r.id === id)).map((id) => `${it.restored[id].name} (lấy lại ${it.restored[id].at}${it.restored[id].note ? ': ' + it.restored[id].note : ''})`).join('; '),
       }));
     if (!entries.length) return;
@@ -876,17 +983,18 @@ function App() {
       <div className="layout">
         <aside className="rail no-print">
           <section className={`drop ${drag ? 'on' : ''}`} onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={onDrop}>
-            <input ref={fileRef} type="file" accept="application/pdf,.pdf,.txt" multiple hidden onChange={(e) => { const fl = Array.from(e.target.files || []); e.target.value = ''; if (fl.length) ingest(fl); }} />
-            <p className="drop-t">Thả PDF “Microbiology Chart Report” của Vitek vào đây</p>
+            <input ref={fileRef} type="file" accept="application/pdf,.pdf,.txt,image/*" multiple hidden onChange={(e) => { const fl = Array.from(e.target.files || []); e.target.value = ''; if (fl.length) ingest(fl); }} />
+            <p className="drop-t">Thả PDF Vitek (“Microbiology Chart Report”), phiếu kết quả vi sinh của khoa (PDF hoặc ảnh scan) vào đây</p>
             <div className="drop-a">
-              <button className="btn" onClick={() => fileRef.current && fileRef.current.click()} disabled={busy}>{busy ? 'Đang đọc…' : 'Chọn tệp PDF'}</button>
+              <button className="btn" onClick={() => fileRef.current && fileRef.current.click()} disabled={busy}>{busy ? 'Đang đọc…' : 'Chọn PDF hoặc ảnh'}</button>
               <button className="btn ghost" onClick={() => setPasteOpen(!pasteOpen)}>Dán văn bản</button>
             </div>
+            {busy && ocrStatus && <p className="small ocr-st" role="status">{ocrStatus}</p>}
             <button className="lnk" onClick={loadSamples}>Thử với 5 báo cáo mẫu (đã ẩn danh)</button>
           </section>
           {pasteOpen && (
             <section className="panel">
-              <textarea value={paste} onChange={(e) => setPaste(e.target.value)} rows={7} placeholder="Dán nội dung văn bản của báo cáo Vitek vào đây…" />
+              <textarea value={paste} onChange={(e) => setPaste(e.target.value)} rows={7} placeholder="Dán nội dung báo cáo Vitek hoặc phiếu kết quả vi sinh của khoa vào đây…" />
               <button className="btn" onClick={analysePaste} disabled={!paste.trim()}>Phân tích</button>
             </section>
           )}
@@ -961,7 +1069,7 @@ function App() {
                 <button role="tab" aria-selected={view === 'lam'} className={view === 'lam' ? 'on' : ''} onClick={() => setView('lam')}>Bản trả lâm sàng</button>
               </div>
               {view === 'ktv' && (
-                <KtvPanel item={cur} rep={curRep} cmp={cmp} onPickGroup={pickGroup} onUseEucast={() => changeSettings({ ...settings, standard: 'eucast' })} onResolve={resolveCheck} onQual={setQual} onRestore={restoreDrug} onHideRow={hideDrug} />
+                <KtvPanel item={cur} rep={curRep} cmp={cmp} onPickGroup={pickGroup} onUseEucast={() => changeSettings({ ...settings, standard: 'eucast' })} onResolve={resolveCheck} onQual={setQual} onRestore={restoreDrug} onHideRow={hideDrug} onIso={(fn) => editIso(cur.uid, fn)} />
               )}
               {view === 'lam' && (
                 <>

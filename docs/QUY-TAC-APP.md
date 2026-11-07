@@ -16,3 +16,9 @@
 - **Cần xác nhận:** kết quả hiếm theo Appendix A (Category I, II chặn duyệt; III chỉ nhắc), kháng bất ngờ ở thuốc phổ rộng, vi khuẩn áp bảng ngoại suy.
 - **Cần xét nghiệm:** D-test, β-lactamase, carbapenemase.
 - **Quy tắc chuyên gia, không phải điều khoản CLSI** (ghi rõ trong app): ampicillin nhạy + cephalosporin thế hệ 3 kháng; ertapenem nhạy + meropenem kháng; erythromycin nhạy + clindamycin kháng.
+
+## Đầu vào đọc bằng OCR
+- Chủng đọc từ PDF scan hoặc ảnh có mục chặn duyệt "Kết quả đọc từ ảnh scan (OCR)" (cả với chủng ghi nguyên không áp bảng). Chỉ gỡ được khi KTV xác nhận đã đối chiếu từng dòng với phiếu gốc.
+- Sửa dòng kết quả, tên vi khuẩn, thêm hoặc xóa dòng ở khung đối chiếu sẽ tự bỏ xác nhận OCR và bỏ duyệt.
+- Gắn cờ "cần xem kỹ": dòng chỉ thấy ở một phần các lần đọc, MIC đã sửa ký tự OCR, MIC ngoài dãy pha loãng chuẩn, tên thuốc khớp gần đúng, thiếu cột S/I/R. Dòng chỉ có tên thuốc mà mất giá trị không bị bịa ra, chỉ được báo.
+- Khi các lần đọc khác nhau: lấy giá trị được nhiều lần đọc đồng ý nhất; hòa thì ưu tiên lần đọc không bị sửa ký tự; mọi chỗ khác nhau được liệt kê trong mục OCR.

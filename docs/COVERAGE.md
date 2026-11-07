@@ -51,6 +51,8 @@ Bảng này được sinh từ `E.COVERAGE` trong `src/engine.js` và cũng hi�
 
 | Trạng thái | Mục | Ghi chú |
 |---|---|---|
+| Đã nạp | Đầu vào: báo cáo Vitek 2 (PDF chữ) và phiếu kết quả vi sinh của khoa (LIS, tiếng Việt) | Phiếu của khoa đọc được từ PDF chữ, dán văn bản, hoặc ảnh scan/ảnh chụp qua OCR chạy ngay trong trình duyệt (Tesseract.js, cần mạng để tải mô hình lần đầu). Đọc từ ảnh luôn phải được KTV đối chiếu với phiếu gốc trước khi duyệt. |
+| Một phần | OCR ảnh scan: độ chính xác | Đã thử trên một phiếu thật: kết quả OCR đổi theo độ phân giải (có lần sót dòng, có lần nhầm ký tự), nên app đọc hai lần ở hai độ phân giải rồi gộp và cảnh báo chỗ khác nhau. Chưa thử trên ảnh chụp nghiêng, mờ, nhiều trang hay phiếu nhiều chủng thật. |
 | Đã nạp | Nấm (Candida, Cryptococcus, Aspergillus…) | Theo yêu cầu: không có bảng diễn giải, kết quả được ghi nguyên như Vitek đã diễn giải; không chặn duyệt, không lọc, không kiểm tra. Thuốc kháng nấm không có cột trong file Excel KSNK nên chỉ nằm ở sheet "Ghi chu KTV". |
 | Chưa nạp | PDF Vitek thật của các nhóm mới | Mới thử bằng dữ liệu giả: Pseudomonas, Acinetobacter, Enterococcus, phế cầu, Haemophilus, Neisseria, kỵ khí và các nhóm EUCAST khác. |
 

@@ -297,3 +297,210 @@ test('EUCAST Expert Rules không đổi CLSI: cùng dữ liệu, chế độ CLS
   const r = rep(iso('Staphylococcus aureus', [R('TCY', '<=', 1, 'S'), R('DOX', '=', 4, 'R')], { FOXS: 'NEG' }), 'blood', 'clsi');
   assert.ok(!r.euApplied || r.euApplied.length === 0);
 });
+
+/* ---------- phiếu kết quả vi sinh của khoa (LIS tiếng Việt) và ảnh scan qua OCR ---------- */
+// Dữ liệu giả: tên, mã BN và STT đã thay; bảng thuốc theo đúng bố cục phiếu thật.
+const LIS_HEAD = (extra) => `Thời gian thực hiện: 02/11/2026 15:44
+Bệnh viện ĐK Lãnh Binh Thăng
+KHOA XÉT NGHIỆM STT:010101-00001
+Mã BN: 12345678
+PHIẾU KẾT QUẢ XÉT NGHIỆM VI SINH
+Họ tên: NGUYEN VAN A
+Khoa phòng: Khoa truyền nhiễm
+Năm sinh: 1967 Giới tính: Nam
+Bác sĩ điều trị: Bs Đoàn Hồng Phương/ Bs Đối tượng: Dịch vụ
+Phạm Anh Tuấn
+Chẩn đoán: Viêm phổi do vi khuẩn, không xác định; Ho Loại mẫu:
+Địa chỉ: 1162/36, Đường 3/2, Phường Phú Thọ, TP. Hồ Chí Minh
+Yêu cầu vi sinh: Vi khuẩn nuôi cấy và định danh hệ thống tự động (Cấy đàm)
+Kết quả cấy: DƯƠNG TÍNH
+${extra}`;
+const LIS_TAIL = `
+Bác sĩ đọc kết quả lúc: 11 giờ 38 phút, Ngày 07 tháng 11 năm 2026
+TL. TRƯỞNG KHOA XÉT NGHIỆM
+Diễn giải/Ghi chú:
+R: Resistance (Kháng)
+I: Intermediate (Trung gian)
+S: Sensitive (Nhạy)`;
+const LIS_TABLE = `Chủng vi sinh: Acinetobacter baumannii complex
+Kháng sinh đồ:
+Kháng sinh MIC (µg/mL) Interpretation
+Amikacin 8 S
+Ceftazidime >=64 R
+Ciprofloxacin >=4 R
+Colistin 1 I
+Cefepime >=32 R
+Imipenem/relebactam >=16 R
+Imipenem >=16 R
+Levofloxacin >=8 R
+Meropenem 8 R
+Tobramycin <=1 S
+Piperacillin/Tazobactam >=128 R`;
+const lis = (table, opts) => E.parseReport(LIS_HEAD(table) + LIS_TAIL, opts);
+
+test('phiếu khoa: đọc đủ thông tin hành chính, bệnh phẩm, tuổi và 11 dòng kháng sinh', () => {
+  const r = lis(LIS_TABLE);
+  assert.equal(r.length, 1);
+  const p = r[0];
+  assert.equal(p.format, 'lis');
+  assert.equal(p.organism, 'Acinetobacter baumannii complex');
+  assert.equal(p.patientName, 'NGUYEN VAN A');
+  assert.equal(p.patientId, '12345678');
+  assert.equal(p.labId, '010101-00001');
+  assert.equal(p.sex, 'NAM');
+  assert.equal(p.age, 59);
+  assert.equal(p.location, 'Khoa truyền nhiễm');
+  assert.equal(p.physician, 'Bs Đoàn Hồng Phương/ Bs Phạm Anh Tuấn');
+  assert.equal(p.source, 'đàm');
+  assert.equal(p.performedDmy, '02/11/2026');
+  assert.equal(p.results.length, 11);
+  const by = Object.fromEntries(p.results.map((x) => [x.id, x]));
+  assert.deepEqual([by.AMK.op, by.AMK.mic, by.AMK.vitek], ['=', 8, 'S']);
+  assert.deepEqual([by.TOB.op, by.TOB.mic, by.TOB.vitek], ['<=', 1, 'S']);
+  assert.deepEqual([by.TZP.op, by.TZP.mic, by.TZP.vitek], ['>=', 128, 'R']);
+  assert.equal(by.CST.vitek, 'I');
+  assert.equal(by.IMR.mic, 16);
+  assert.equal(p.readWarnings.length, 0);
+  assert.equal(p.unknown.length, 0);
+});
+
+test('phiếu khoa: kết quả đi qua engine, Acinetobacter được áp bảng CLSI', () => {
+  const p = lis(LIS_TABLE)[0];
+  const r = rep(p, 'lrt');
+  assert.ok(!r.unsupported);
+  assert.ok(r.reported.length > 0);
+  assert.ok(!r.checks.some((c) => c.id === 'ocr'), 'phiếu chữ không phải OCR nên không có mục OCR');
+});
+
+test('OCR: sửa lỗi ký tự thường gặp và báo cho KTV', () => {
+  const noisy = `Ching vi sinh: 4cinetobacter baumannii complex
+Khang sinh do:
+| Khang sinh MIC (pg/mL) |Interpretation
+| Amikacin 8 S
+Ceftazidime >=64 R
+Colistin l I
+Levofloxacin >=§ R
+Tobramycin <=] S
+Piperacillin/Tazobactam | >=128 | R |`;
+  const p = lis(noisy, { ocr: true })[0];
+  assert.equal(p.organism, 'Acinetobacter baumannii complex');
+  assert.ok(p.orgFixed);
+  const by = Object.fromEntries(p.results.map((x) => [x.id, x]));
+  assert.equal(by.CST.mic, 1); assert.equal(by.CST.vitek, 'I');
+  assert.equal(by.LVX.mic, 8); assert.equal(by.LVX.op, '>=');
+  assert.equal(by.TOB.mic, 1); assert.equal(by.TOB.op, '<=');
+  assert.equal(by.TZP.mic, 128); assert.equal(by.TZP.vitek, 'R');
+  assert.ok(by.CST.suspect && by.LVX.suspect && by.TOB.suspect);
+  assert.ok(!by.AMK.suspect && !by.CAZ.suspect);
+  assert.ok(p.readWarnings.some((w) => w.k === 'org'));
+  assert.ok(p.readWarnings.filter((w) => w.k === 'mic').length >= 3);
+  assert.ok(p.ocr && p.ocr.used);
+});
+
+test('OCR: dòng mất giá trị, MIC ngoài dãy chuẩn và thiếu cột Interpretation đều được báo', () => {
+  const t = `Chủng vi sinh: Acinetobacter baumannii complex
+Amikacin 8 S
+Ceftazidime >=64 R
+Meropenem 6 R
+Cefepime >=32
+Piperacillin/Tazobactam`;
+  const p = lis(t, { ocr: true })[0];
+  const by = Object.fromEntries(p.results.map((x) => [x.id, x]));
+  assert.equal(by.MEM.mic, 6); assert.ok(by.MEM.suspect);
+  assert.equal(by.FEP.vitek, ''); assert.ok(by.FEP.suspect);
+  assert.ok(!by.TZP, 'dòng không có MIC không được bịa ra kết quả');
+  const w = p.readWarnings.map((x) => x.k);
+  assert.ok(w.includes('ladder') && w.includes('interp') && w.includes('skip'));
+});
+
+test('OCR: gộp các lần đọc: lấy hợp các dòng, biểu quyết khi khác nhau, ghi lại chỗ khác nhau', () => {
+  const rd = (t) => lis('Chủng vi sinh: Acinetobacter baumannii complex\n' + t, { ocr: true })[0];
+  const a = rd('Amikacin 8 S\nLevofloxacin >=§ R\nMeropenem 8 R\nTobramycin <1 S');
+  const b = rd('Amikacin 8 S\nCeftazidime >=64 R\nLevofloxacin >=8 R\nMeropenem 6 R\nTobramycin <=1 S');
+  const c = rd('Amikacin 8 S\nCeftazidime >=64 R\nLevofloxacin >=8 R\nMeropenem 8 R\nTobramycin <=1 S');
+  const m = E.mergeReads([a, b, c]);
+  const by = Object.fromEntries(m.results.map((x) => [x.id, x]));
+  assert.equal(m.results.length, 5, 'dòng Ceftazidime chỉ hai trong ba lần thấy vẫn được giữ');
+  assert.equal(by.LVX.mic, 8); assert.equal(by.LVX.suspect, false, 'hai lần đọc sạch xác nhận giá trị');
+  assert.equal(by.MEM.mic, 8, 'biểu quyết 2/3 cho MIC 8, không giữ 6');
+  assert.deepEqual([by.TOB.op, by.TOB.mic], ['<=', 1], 'biểu quyết 2/3 cho ≤1, không giữ <1');
+  assert.ok(m.ocr.conflicts.some((c) => c.id === 'MEM') && m.ocr.conflicts.some((c) => c.id === 'TOB'));
+  assert.ok(m.readWarnings.some((x) => x.k === 'single' && /Ceftazidime/.test(x.text)));
+  assert.ok(by.CAZ.suspect, 'dòng chỉ thấy ở 2/3 lần đọc bị đánh dấu cần xem kỹ');
+  assert.equal(m.ocr.passes, 3);
+  // hai lần đọc hòa nhau: ưu tiên lần đọc không bị sửa ký tự / MIC nằm trong dãy chuẩn
+  const t2 = E.mergeReads([rd('Meropenem 6 R'), rd('Meropenem 8 R')]);
+  assert.equal(t2.results[0].mic, 8);
+});
+
+test('OCR: ký tự rác của đường kẻ bảng không được biến thành MIC', () => {
+  const t = `Chủng vi sinh: Acinetobacter baumannii complex
+Meropenem 8 ] R
+Tobramycin <=1 T S :
+Colistin 1 | 1
+Imipenem | >=16 | R |`;
+  const by = Object.fromEntries(lis(t, { ocr: true })[0].results.map((x) => [x.id, x]));
+  assert.deepEqual([by.MEM.op, by.MEM.mic, by.MEM.vitek], ['=', 8, 'R'], '] giữa MIC và S/I/R không được đọc thành MIC 1');
+  assert.deepEqual([by.TOB.op, by.TOB.mic, by.TOB.vitek], ['<=', 1, 'S']);
+  assert.deepEqual([by.CST.mic, by.CST.vitek], [1, 'I'], '1 cuối dòng sau MIC là chữ I bị đọc nhầm');
+  assert.deepEqual([by.IPM.op, by.IPM.mic, by.IPM.vitek], ['>=', 16, 'R']);
+});
+
+test('OCR: chủng đọc bằng OCR luôn có mục chặn duyệt cho tới khi KTV xác nhận', () => {
+  const p = lis(LIS_TABLE, { ocr: true })[0];
+  const r = rep(p, 'lrt');
+  const c = r.checks.find((x) => x.id === 'ocr');
+  assert.ok(c && c.block && c.sev === 'confirm');
+  assert.equal(r.checks[0].id, 'ocr', 'mục OCR đứng đầu danh sách');
+  // chủng chưa có bảng (ghi nguyên) vẫn phải có mục OCR
+  const q = Object.assign({}, p, { organism: 'Candida albicans' });
+  const r2 = rep(q, 'lrt');
+  assert.ok(r2.unsupported && r2.checks.some((x) => x.id === 'ocr' && x.block));
+});
+
+test('phiếu khoa: văn bản PDF chạy liền một dòng và phiếu nhiều chủng', () => {
+  const flow = 'PHIẾU KẾT QUẢ XÉT NGHIỆM VI SINH Họ tên: NGUYEN VAN A Năm sinh: 1967 Giới tính: Nữ Khoa phòng: Khoa hồi sức Yêu cầu vi sinh: Vi khuẩn nuôi cấy (Cấy máu) Kết quả cấy: DƯƠNG TÍNH Chủng vi sinh: Escherichia coli Kháng sinh đồ: Kháng sinh MIC (µg/mL) Interpretation Ampicillin >=32 R Gentamicin <=1 S Ciprofloxacin 0.5 I Bác sĩ đọc kết quả lúc: 08 giờ 05 phút, Ngày 07 tháng 11 năm 2026';
+  const f = E.parseReport(flow)[0];
+  assert.equal(f.organism, 'Escherichia coli');
+  assert.equal(f.sex, 'NỮ');
+  assert.equal(f.source, 'máu');
+  assert.deepEqual(f.results.map((x) => x.id), ['AMP', 'GEN', 'CIP']);
+  const multi = lis(`Chủng vi sinh: Escherichia coli
+Ampicillin >=32 R
+Gentamicin <=1 S
+Chủng vi sinh: Klebsiella pneumoniae
+Ampicillin >=32 R
+Meropenem <=0.25 S`);
+  assert.equal(multi.length, 2);
+  assert.equal(multi[0].organism, 'Escherichia coli'); assert.equal(multi[0].results.length, 2);
+  assert.equal(multi[1].organism, 'Klebsiella pneumoniae'); assert.equal(multi[1].results.length, 2);
+  assert.equal(multi[1].patientName, 'NGUYEN VAN A');
+});
+
+test('phiếu khoa: cấy âm tính không có kháng sinh đồ; tự nhận dạng không làm hỏng báo cáo Vitek', () => {
+  const neg = E.parseReport(LIS_HEAD('').replace('DƯƠNG TÍNH', 'ÂM TÍNH') + LIS_TAIL);
+  assert.equal(neg.length, 1); assert.equal(neg[0].culture, 'negative'); assert.equal(neg[0].results.length, 0);
+  const t = 'Patient Name: ., X Patient ID: 9 Lab ID: Z-1 Isolate Number: 1 Selected Organism : Escherichia coli BP Infection Site: Source: Urine Collected: Susceptibility Information Analysis Time: 1 hours Status: Final Antimicrobial MIC Interpretation Ampicillin <= 2 S Gentamicin <= 1 S';
+  assert.equal(E.detectFormat(t), 'vitek');
+  const v = E.parseReport(t);
+  assert.equal(v.length, 1); assert.equal(v[0].format, 'vitek'); assert.equal(v[0].results.length, 2);
+  assert.equal(E.parseReport('xin chào').length, 0);
+});
+
+test('khớp tên thuốc gần đúng không nhầm sang thuốc khác', () => {
+  assert.equal(E.matchDrug('Cefepime').id, 'FEP');
+  assert.equal(E.matchDrug('Cefepimc').id, 'FEP');
+  assert.equal(E.matchDrug('Ampicilin').id, 'AMP');
+  assert.equal(E.matchDrug('Imipenem / relebactam').id, 'IMR');
+  assert.equal(E.matchDrug('Piperacillin-Tazobactam').id, 'TZP');
+  assert.equal(E.matchDrug('Cefixime').id, 'CFM');
+  assert.equal(E.matchDrug('xyzzy'), null);
+});
+
+test('phiếu khoa: văn bản chạy liền, "Loại mẫu:" để trống không được ăn sang trường kế tiếp', () => {
+  const flow = 'Chẩn đoán: Viêm phổi Loại mẫu: Địa chỉ: 12 Lê Lợi Yêu cầu vi sinh: Vi khuẩn nuôi cấy (Cấy đàm) Kết quả cấy: DƯƠNG TÍNH Chủng vi sinh: Escherichia coli Kháng sinh đồ: Ampicillin >=32 R';
+  const p = E.parseReport(flow)[0];
+  assert.equal(p.source, 'đàm');
+  assert.equal(p.address, '12 Lê Lợi');
+  assert.equal(p.diagnosis, 'Viêm phổi');
+});
